@@ -133,13 +133,18 @@ export function isTaskScheduledForDate(rruleStr: string, date: Date): boolean {
     const normalizedRule = rruleStr.replace('RRULE:', '')
     const rule = RRule.fromString(normalizedRule)
 
-    const startOfDay = new Date(date)
-    startOfDay.setHours(0, 0, 0, 0)
+    // Set dtstart to a date far in the past so between() works correctly
+    // Without dtstart, RRule can't calculate occurrences properly
+    const ruleWithStart = new RRule({
+      ...rule.origOptions,
+      dtstart: new Date(Date.UTC(2000, 0, 1, 0, 0, 0)),
+    })
 
-    const endOfDay = new Date(date)
-    endOfDay.setHours(23, 59, 59, 999)
+    // Use UTC dates to avoid timezone issues
+    const startOfDay = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0))
+    const endOfDay = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59))
 
-    const occurrences = rule.between(startOfDay, endOfDay, true)
+    const occurrences = ruleWithStart.between(startOfDay, endOfDay, true)
     return occurrences.length > 0
   } catch {
     return false

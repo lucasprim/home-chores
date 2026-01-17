@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Button, Card, CardContent, Badge, Modal, Input } from '@/components/ui'
 import { Category, Role } from '@prisma/client'
 import { rruleToReadable, createDailyRule, createWeekdaysRule, createWeeklyRule, createMonthlyRule, parseRuleToPreset } from '@/lib/rrule-utils'
+import { RecurrenceDialog, configToReadable, parseRruleToConfig, RecurrenceConfig } from '@/components/recurrence-dialog'
 
 interface Employee {
   id: string
@@ -276,6 +277,10 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
   const [weeklyDays, setWeeklyDays] = useState<number[]>(parsed.days ?? [0, 1, 2, 3, 4])
   const [monthDay, setMonthDay] = useState(parsed.monthDay ?? 1)
   const [customRrule, setCustomRrule] = useState(parsed.type === 'custom' ? task?.rrule ?? '' : '')
+  const [showRecurrenceDialog, setShowRecurrenceDialog] = useState(false)
+  const [customConfig, setCustomConfig] = useState<RecurrenceConfig | null>(
+    parsed.type === 'custom' && task?.rrule ? parseRruleToConfig(task.rrule) : null
+  )
 
   const getRrule = (): string => {
     switch (recurrenceType) {
@@ -334,6 +339,12 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
     setWeeklyDays((prev) =>
       prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort()
     )
+  }
+
+  const handleRecurrenceConfirm = (rrule: string, config: RecurrenceConfig) => {
+    setCustomRrule(rrule)
+    setCustomConfig(config)
+    setRecurrenceType('custom')
   }
 
   return (
@@ -484,19 +495,41 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
               type="radio"
               name="recurrence"
               checked={recurrenceType === 'custom'}
-              onChange={() => setRecurrenceType('custom')}
+              onChange={() => {
+                if (!customRrule) {
+                  setShowRecurrenceDialog(true)
+                } else {
+                  setRecurrenceType('custom')
+                }
+              }}
             />
-            <span>Personalizado (RRULE)</span>
+            <span>Personalizado...</span>
           </label>
 
-          {recurrenceType === 'custom' && (
+          {recurrenceType === 'custom' && customConfig && (
+            <div className="ml-6 p-3 rounded-lg bg-[var(--secondary)] flex items-center justify-between gap-2">
+              <span className="text-sm">{configToReadable(customConfig)}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowRecurrenceDialog(true)}
+              >
+                Editar
+              </Button>
+            </div>
+          )}
+
+          {recurrenceType === 'custom' && !customConfig && (
             <div className="ml-6">
-              <Input
-                value={customRrule}
-                onChange={(e) => setCustomRrule(e.target.value)}
-                placeholder="FREQ=WEEKLY;INTERVAL=2;BYDAY=MO"
-                className="font-mono text-sm"
-              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowRecurrenceDialog(true)}
+              >
+                Configurar recorrência
+              </Button>
             </div>
           )}
         </div>
@@ -525,6 +558,13 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
           {submitting ? 'Salvando...' : task ? 'Salvar' : 'Criar'}
         </Button>
       </div>
+
+      <RecurrenceDialog
+        open={showRecurrenceDialog}
+        onClose={() => setShowRecurrenceDialog(false)}
+        onConfirm={handleRecurrenceConfirm}
+        initialRrule={customRrule || undefined}
+      />
     </form>
   )
 }
