@@ -1,0 +1,214 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// FUNCIONÁRIOS
+// ============================================
+
+model Employee {
+  id        String   @id @default(cuid())
+  name      String
+  role      Role
+  workDays  Int[]    // 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sab
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tasks         Task[]
+  mealSchedules MealSchedule[]
+  printJobs     PrintJob[]
+
+  @@map("employees")
+}
+
+enum Role {
+  FAXINEIRA    // Limpeza geral
+  COZINHEIRA   // Preparo de refeições
+  BABA         // Cuidado de crianças
+  JARDINEIRO   // Cuidado do jardim
+  MOTORISTA    // Transporte
+  OUTRO        // Outros
+
+  @@map("role")
+}
+
+// ============================================
+// TAREFAS
+// ============================================
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    Category
+  rrule       String   // Formato iCalendar RRULE
+  employeeId  String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee    Employee?        @relation(fields: [employeeId], references: [id])
+  occurrences TaskOccurrence[]
+
+  @@index([employeeId])
+  @@index([active])
+  @@map("tasks")
+}
+
+enum Category {
+  LIMPEZA      // Limpeza de ambientes
+  COZINHA      // Tarefas de cozinha
+  LAVANDERIA   // Lavar, passar, dobrar
+  ORGANIZACAO  // Organização geral
+  COMPRAS      // Compras e mercado
+  MANUTENCAO   // Manutenção da casa
+  JARDIM       // Cuidados com jardim
+  CRIANCAS     // Cuidado de crianças
+  PETS         // Cuidado de animais
+  OUTRO        // Outros
+
+  @@map("category")
+}
+
+model TaskOccurrence {
+  id          String    @id @default(cuid())
+  taskId      String
+  date        DateTime  @db.Date
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+  notes       String?
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, date])
+  @@index([date])
+  @@index([taskId, date])
+  @@map("task_occurrences")
+}
+
+// ============================================
+// CARDÁPIO
+// ============================================
+
+model Dish {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  category    DishCategory
+  prepTime    Int?         // Tempo de preparo em minutos
+  servings    Int?         // Número de porções
+  ingredients String[]     // Lista de ingredientes
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  mealSchedules MealSchedule[]
+
+  @@map("dishes")
+}
+
+enum DishCategory {
+  CAFE_MANHA   // Café da manhã
+  ALMOCO       // Almoço
+  JANTAR       // Jantar
+  LANCHE       // Lanche
+  SOBREMESA    // Sobremesa
+  BEBIDA       // Bebidas
+
+  @@map("dish_category")
+}
+
+model MealSchedule {
+  id         String   @id @default(cuid())
+  date       DateTime @db.Date
+  mealType   MealType
+  dishId     String
+  employeeId String?  // Quem vai preparar
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  dish     Dish      @relation(fields: [dishId], references: [id])
+  employee Employee? @relation(fields: [employeeId], references: [id])
+
+  @@unique([date, mealType])
+  @@index([date])
+  @@map("meal_schedules")
+}
+
+enum MealType {
+  CAFE_MANHA
+  ALMOCO
+  JANTAR
+
+  @@map("meal_type")
+}
+
+// ============================================
+// CONFIGURAÇÕES
+// ============================================
+
+model Settings {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   // JSON string para valores complexos
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ============================================
+// IMPRESSÃO
+// ============================================
+
+model PrintJob {
+  id             String    @id @default(cuid())
+  name           String
+  cronExpression String    // Formato cron (ex: "0 7 * * 1-5")
+  type           PrintType
+  employeeId     String?   // Se null, imprime para todos
+  enabled        Boolean   @default(true)
+  lastRunAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  employee Employee?  @relation(fields: [employeeId], references: [id])
+  logs     PrintLog[]
+
+  @@map("print_jobs")
+}
+
+enum PrintType {
+  DAILY_TASKS   // Lista de tarefas do dia
+  SINGLE_TASK   // Ticket de tarefa individual
+  WEEKLY_MENU   // Cardápio da semana
+
+  @@map("print_type")
+}
+
+model PrintLog {
+  id         String      @id @default(cuid())
+  printJobId String?
+  status     PrintStatus
+  error      String?
+  createdAt  DateTime    @default(now())
+
+  printJob PrintJob? @relation(fields: [printJobId], references: [id], onDelete: SetNull)
+
+  @@index([printJobId])
+  @@index([createdAt])
+  @@map("print_logs")
+}
+
+enum PrintStatus {
+  SUCCESS
+  FAILED
+  SKIPPED // Ex: nenhuma tarefa para imprimir
+
+  @@map("print_status")
+}
