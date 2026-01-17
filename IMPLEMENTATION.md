@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase:** Phase 4 Complete
+**Phase:** Phase 5 Complete - Special Tasks & Multi-page Printing
 **Next Task:** None - All features implemented!
 **Blocked:** No
 
@@ -58,6 +58,59 @@
 - [x] Scheduler service (node-cron)
 
 ## Completed Work
+
+### 2026-01-17: Fundamental Redesign - Print List Generator (not Task Tracker)
+- **Major Refactoring**: System redesigned to be a print list generator, NOT a task tracker
+- **Key Concept**: Recurrence (rrule) only determines which day a task appears in the print list
+- **Removed**: All task completion tracking (TaskOccurrence, SpecialTaskOccurrence models)
+- **Today Page**: Now read-only preview of what would be printed (no checkboxes)
+- **Special Tasks**: Simplified - just tasks that print on own paper with due date info
+- **Settings**: Added timezone setting (replaced default_print_time)
+- Changes made:
+  - Updated Prisma schema: removed TaskOccurrence, SpecialTaskOccurrence, SpecialTaskStatus
+  - Updated Today page: removed completion toggling, now shows preview only
+  - Created new `/api/tasks/for-date` endpoint that filters by rrule at runtime
+  - Updated Print preview/execute to work directly with tasks (no occurrences)
+  - Updated Scheduler to work directly with tasks (no occurrences)
+  - Updated Settings page: added timezone selector (Brazilian timezones)
+  - Deleted occurrence-based API routes and lib/special-tasks.ts
+  - Updated all documentation (specifications, data-model, today.md, tasks.md)
+
+### 2026-01-17: Bug Fix - Special Tasks Not Appearing on Today/Print
+- **Problem**: Special tasks with daily recurrence weren't showing on Today or Print tabs
+- **Root Cause**: Special task occurrences were only generated once at server startup, not on-demand when viewing a specific date
+- **Fix**:
+  - Created shared utility `lib/special-tasks.ts` for generating occurrences for any date
+  - Today tab now generates occurrences for the selected date before fetching
+  - Today tab now shows all special tasks that appeared on the selected date (not filtered to 3-day urgency)
+  - Print preview API now generates occurrences for the selected date
+  - Print preview API now filters by the selected date's `appearDate` (not TODAY+7 `dueDate`)
+- Files changed:
+  - `lib/special-tasks.ts` (new) - Shared occurrence generation utility
+  - `app/api/special-tasks/occurrences/route.ts` - Added `appearDate` filter to GET, date param to POST
+  - `app/(auth)/today/page.tsx` - Generate occurrences on-demand, fetch by appearDate
+  - `app/api/print/preview/route.ts` - Generate occurrences and filter by selected date
+  - `lib/scheduler.ts` - Refactored to use shared utility
+
+### 2026-01-17: Special Tasks Refactor (Template/Occurrence Model)
+- Special tasks now use a template/occurrence pattern:
+  - **SpecialTask** is a template with rrule (when to generate) and dueDays (deadline after appearing)
+  - **SpecialTaskOccurrence** is generated instance with appearDate, dueDate, and status
+- Scheduler generates occurrences when rrule matches, calculates dueDate from dueDays
+- Occurrences persist until completed or expired (past due date)
+- Today page shows urgent special task occurrences (due within 3 days)
+- Print includes pending occurrences (due within 7 days)
+- Tasks page shows templates with pending occurrence count badge
+- API routes:
+  - /api/special-tasks - Template CRUD
+  - /api/special-tasks/occurrences - List/generate occurrences
+  - /api/special-tasks/occurrences/[id] - Update status (complete/extend)
+
+### 2026-01-17: Special Tasks Integration (UI)
+- Integrated special tasks into the main tasks page (removed separate /special-tasks page)
+- Tasks page now has two tabs: "Recorrentes" and "Especiais"
+- Task form supports creating both types with a toggle (Recorrente / Especial)
+- Removed "Especiais" from navigation - all task management in one place
 
 ### 2026-01-17: Phase 4 - Print Jobs & Scheduler
 - Print jobs list page with CRUD functionality
@@ -150,19 +203,20 @@
 ```
 app/
 ├── (auth)/           # Protected routes
-│   ├── today/        # Daily tasks dashboard
-│   ├── tasks/        # Task management
+│   ├── today/        # Print preview for any date (read-only)
+│   ├── tasks/        # Task management (recurring + special tasks with tabs)
 │   ├── employees/    # Employee management
 │   ├── menu/         # Meal planning calendar & dishes
 │   ├── print/        # Manual printing
 │   ├── print-jobs/   # Automated print jobs management
-│   └── settings/     # App settings
+│   └── settings/     # App settings (house name, printer, timezone)
 ├── login/
 └── api/
     ├── auth/         # Login/logout
     ├── employees/    # CRUD
-    ├── tasks/        # CRUD
-    ├── occurrences/  # Task completion tracking
+    ├── tasks/        # CRUD (regular tasks)
+    │   └── for-date/ # Get tasks for a specific date (filtered by rrule)
+    ├── special-tasks/ # Special task CRUD
     ├── dishes/       # CRUD
     ├── meal-schedule/ # Calendar & randomize
     ├── print/        # Preview & execute
@@ -171,7 +225,7 @@ app/
 lib/
 ├── prisma.ts         # Database client
 ├── printer.ts        # Thermal printer functions
-├── rrule-utils.ts    # Recurrence rule utilities
+├── rrule-utils.ts    # Recurrence rule utilities (includes isTaskScheduledForDate)
 └── scheduler.ts      # node-cron scheduler for print jobs
 instrumentation.ts    # Next.js server startup hook (initializes scheduler)
 ```
@@ -196,10 +250,13 @@ instrumentation.ts    # Next.js server startup hook (initializes scheduler)
 
 ## What's Working
 
+> **Key Concept**: This is a PRINT LIST GENERATOR, not a task tracker. No completion tracking.
+
 - **Employees**: Create, edit, delete employees with roles and work days
 - **Tasks**: Create recurring tasks with flexible schedules (daily, weekdays, specific days, monthly)
-- **Today**: View and complete tasks for any date, grouped by employee
-- **Print**: Preview and print daily tasks or weekly menu to thermal printer
+- **Special Tasks**: Tasks that print on own paper with due date (integrated in Tasks page under "Especiais" tab)
+- **Today**: Preview of what would be printed for any date (read-only, no completion tracking)
+- **Print**: Preview and print daily tasks or weekly menu to thermal printer (multi-page with partial cuts)
 - **Print Jobs**: Schedule automated printing with cron-like scheduling
 - **Menu**: Plan meals with dish repertoire, calendar view, randomize feature
-- **Settings**: Configure house name, printer IP, change PIN
+- **Settings**: Configure house name, printer IP, timezone, change PIN

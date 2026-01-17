@@ -23,6 +23,20 @@ interface Task {
   active: boolean
 }
 
+interface SpecialTask {
+  id: string
+  title: string
+  description: string | null
+  category: Category
+  rrule: string
+  dueDays: number
+  employeeId: string | null
+  employee: Employee | null
+  active: boolean
+}
+
+type TabType = 'recurring' | 'special'
+
 const CATEGORY_LABELS: Record<Category, string> = {
   LIMPEZA: 'Limpeza',
   COZINHA: 'Cozinha',
@@ -50,12 +64,15 @@ const CATEGORY_ICONS: Record<Category, string> = {
 }
 
 export default function TasksPage() {
+  const [activeTab, setActiveTab] = useState<TabType>('recurring')
   const [tasks, setTasks] = useState<Task[]>([])
+  const [specialTasks, setSpecialTasks] = useState<SpecialTask[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [editingSpecialTask, setEditingSpecialTask] = useState<SpecialTask | null>(null)
   const [showInactive, setShowInactive] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState<Category | ''>('')
   const [employeeFilter, setEmployeeFilter] = useState<string>('')
@@ -76,6 +93,19 @@ export default function TasksPage() {
     }
   }, [])
 
+  const fetchSpecialTasks = useCallback(async () => {
+    try {
+      const params = new URLSearchParams()
+      if (showInactive) params.set('includeInactive', 'true')
+      const res = await fetch(`/api/special-tasks?${params}`)
+      if (!res.ok) throw new Error('Erro ao carregar tarefas especiais')
+      const data = await res.json()
+      setSpecialTasks(data)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro desconhecido')
+    }
+  }, [showInactive])
+
   const fetchEmployees = useCallback(async () => {
     try {
       const res = await fetch('/api/employees')
@@ -90,16 +120,25 @@ export default function TasksPage() {
 
   useEffect(() => {
     fetchTasks()
+    fetchSpecialTasks()
     fetchEmployees()
-  }, [fetchTasks, fetchEmployees])
+  }, [fetchTasks, fetchSpecialTasks, fetchEmployees])
 
   const handleAdd = () => {
     setEditingTask(null)
+    setEditingSpecialTask(null)
     setIsModalOpen(true)
   }
 
-  const handleEdit = (task: Task) => {
+  const handleEditTask = (task: Task) => {
     setEditingTask(task)
+    setEditingSpecialTask(null)
+    setIsModalOpen(true)
+  }
+
+  const handleEditSpecialTask = (task: SpecialTask) => {
+    setEditingTask(null)
+    setEditingSpecialTask(task)
     setIsModalOpen(true)
   }
 
@@ -117,12 +156,48 @@ export default function TasksPage() {
     }
   }
 
+  const handleToggleSpecialTaskActive = async (task: SpecialTask) => {
+    try {
+      const res = await fetch(`/api/special-tasks/${task.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !task.active }),
+      })
+      if (!res.ok) throw new Error('Erro ao atualizar tarefa')
+      await fetchSpecialTasks()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao atualizar')
+    }
+  }
+
+  const handleDeleteSpecialTask = async (task: SpecialTask) => {
+    if (!confirm('Tem certeza que deseja excluir esta tarefa especial?')) return
+    try {
+      const res = await fetch(`/api/special-tasks/${task.id}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error('Erro ao excluir tarefa')
+      await fetchSpecialTasks()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao excluir')
+    }
+  }
+
   const handleFormSubmit = async () => {
     await fetchTasks()
+    await fetchSpecialTasks()
     setIsModalOpen(false)
   }
 
   const filteredTasks = tasks.filter((task) => {
+    if (!showInactive && !task.active) return false
+    if (categoryFilter && task.category !== categoryFilter) return false
+    if (employeeFilter && task.employeeId !== employeeFilter) return false
+    if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false
+    return true
+  })
+
+  const filteredSpecialTasks = specialTasks.filter((task) => {
     if (!showInactive && !task.active) return false
     if (categoryFilter && task.category !== categoryFilter) return false
     if (employeeFilter && task.employeeId !== employeeFilter) return false
@@ -143,6 +218,31 @@ export default function TasksPage() {
         </div>
       )}
 
+      {/* Tabs */}
+      <div className="flex border-b border-[var(--border)]">
+        <button
+          onClick={() => setActiveTab('recurring')}
+          className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+            activeTab === 'recurring'
+              ? 'border-[var(--primary)] text-[var(--primary)]'
+              : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+          }`}
+        >
+          Recorrentes ({tasks.filter(t => showInactive || t.active).length})
+        </button>
+        <button
+          onClick={() => setActiveTab('special')}
+          className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
+            activeTab === 'special'
+              ? 'border-[var(--primary)] text-[var(--primary)]'
+              : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+          }`}
+        >
+          Especiais ({filteredSpecialTasks.length})
+        </button>
+      </div>
+
+      {/* Filters */}
       <div className="flex flex-wrap gap-2">
         <select
           value={categoryFilter}
@@ -188,61 +288,130 @@ export default function TasksPage() {
         </label>
       </div>
 
-      {loading ? (
-        <div className="text-center py-8 text-[var(--muted-foreground)]">Carregando...</div>
-      ) : filteredTasks.length === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <p className="text-[var(--muted-foreground)]">
-              {tasks.length === 0
-                ? 'Nenhuma tarefa cadastrada ainda.'
-                : 'Nenhuma tarefa encontrada com os filtros selecionados.'}
-            </p>
-            {tasks.length === 0 && (
-              <Button onClick={handleAdd} className="mt-4">
-                Cadastrar primeira tarefa
-              </Button>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {filteredTasks.map((task) => (
-            <Card key={task.id} className={!task.active ? 'opacity-60' : ''}>
-              <CardContent className="flex items-center justify-between py-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
-                    <span className="font-medium truncate">{task.title}</span>
-                    {!task.active && <Badge variant="warning">Inativa</Badge>}
-                  </div>
-                  <div className="text-sm text-[var(--muted-foreground)] mt-1">
-                    {task.employee ? task.employee.name : 'Sem atribuição'} •{' '}
-                    {rruleToReadable(task.rrule)}
-                  </div>
-                </div>
-                <div className="flex gap-2 ml-4">
-                  <Button variant="ghost" size="sm" onClick={() => handleEdit(task)}>
-                    Editar
+      {/* Recurring Tasks Tab */}
+      {activeTab === 'recurring' && (
+        <>
+          {loading ? (
+            <div className="text-center py-8 text-[var(--muted-foreground)]">Carregando...</div>
+          ) : filteredTasks.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-[var(--muted-foreground)]">
+                  {tasks.length === 0
+                    ? 'Nenhuma tarefa recorrente cadastrada ainda.'
+                    : 'Nenhuma tarefa encontrada com os filtros selecionados.'}
+                </p>
+                {tasks.length === 0 && (
+                  <Button onClick={handleAdd} className="mt-4">
+                    Cadastrar primeira tarefa
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => handleToggleActive(task)}>
-                    {task.active ? 'Desativar' : 'Ativar'}
-                  </Button>
-                </div>
+                )}
               </CardContent>
             </Card>
-          ))}
-        </div>
+          ) : (
+            <div className="space-y-3">
+              {filteredTasks.map((task) => (
+                <Card key={task.id} className={!task.active ? 'opacity-60' : ''}>
+                  <CardContent className="flex items-center justify-between py-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
+                        <span className="font-medium truncate">{task.title}</span>
+                        {!task.active && <Badge variant="warning">Inativa</Badge>}
+                      </div>
+                      <div className="text-sm text-[var(--muted-foreground)] mt-1">
+                        {task.employee ? task.employee.name : 'Sem atribuição'} •{' '}
+                        {rruleToReadable(task.rrule)}
+                      </div>
+                    </div>
+                    <div className="flex gap-2 ml-4">
+                      <Button variant="ghost" size="sm" onClick={() => handleEditTask(task)}>
+                        Editar
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleToggleActive(task)}>
+                        {task.active ? 'Desativar' : 'Ativar'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Special Tasks Tab */}
+      {activeTab === 'special' && (
+        <>
+          <p className="text-sm text-[var(--muted-foreground)]">
+            Tarefas com prazo para conclusão. Quando aparecem na agenda, têm um número de dias para serem concluídas.
+          </p>
+
+          {filteredSpecialTasks.length === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-[var(--muted-foreground)]">
+                  {specialTasks.length === 0
+                    ? 'Nenhuma tarefa especial cadastrada ainda.'
+                    : 'Nenhuma tarefa encontrada com os filtros selecionados.'}
+                </p>
+                {specialTasks.length === 0 && (
+                  <Button onClick={handleAdd} className="mt-4">
+                    Cadastrar primeira tarefa especial
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {filteredSpecialTasks.map((task) => (
+                <Card key={task.id} className={!task.active ? 'opacity-60' : ''}>
+                  <CardContent className="flex items-center justify-between py-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
+                        <span className="font-medium">{task.title}</span>
+                        {!task.active && <Badge variant="warning">Inativa</Badge>}
+                      </div>
+                      <div className="text-sm text-[var(--muted-foreground)] mt-1">
+                        {task.employee ? task.employee.name : 'Sem atribuição'} •{' '}
+                        {rruleToReadable(task.rrule)} • Prazo: {task.dueDays} dias
+                      </div>
+                      {task.description && (
+                        <div className="text-sm text-[var(--muted-foreground)] mt-1 truncate">
+                          {task.description}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-2 ml-4 flex-shrink-0">
+                      <Button variant="ghost" size="sm" onClick={() => handleEditSpecialTask(task)}>
+                        Editar
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleToggleSpecialTaskActive(task)}>
+                        {task.active ? 'Desativar' : 'Ativar'}
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => handleDeleteSpecialTask(task)}>
+                        Excluir
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <Modal
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}
+        title={editingTask ? 'Editar Tarefa' : editingSpecialTask ? 'Editar Tarefa Especial' : 'Nova Tarefa'}
       >
         <TaskForm
           task={editingTask}
+          specialTask={editingSpecialTask}
           employees={employees}
+          defaultTab={activeTab}
           onSuccess={handleFormSubmit}
           onCancel={() => setIsModalOpen(false)}
         />
@@ -253,7 +422,9 @@ export default function TasksPage() {
 
 interface TaskFormProps {
   task: Task | null
+  specialTask: SpecialTask | null
   employees: Employee[]
+  defaultTab: TabType
   onSuccess: () => void
   onCancel: () => void
 }
@@ -262,25 +433,36 @@ type RecurrenceType = 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'custom'
 
 const DAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
-function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
-  const [title, setTitle] = useState(task?.title ?? '')
-  const [description, setDescription] = useState(task?.description ?? '')
-  const [category, setCategory] = useState<Category>(task?.category ?? 'LIMPEZA')
-  const [employeeId, setEmployeeId] = useState(task?.employeeId ?? '')
-  const [active, setActive] = useState(task?.active ?? true)
+function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCancel }: TaskFormProps) {
+  // Determine initial task type based on what's being edited
+  const initialIsSpecial = specialTask !== null || (task === null && specialTask === null && defaultTab === 'special')
+
+  const [isSpecial, setIsSpecial] = useState(initialIsSpecial)
+  const [title, setTitle] = useState(task?.title ?? specialTask?.title ?? '')
+  const [description, setDescription] = useState(task?.description ?? specialTask?.description ?? '')
+  const [category, setCategory] = useState<Category>(task?.category ?? specialTask?.category ?? 'LIMPEZA')
+  const [employeeId, setEmployeeId] = useState(task?.employeeId ?? specialTask?.employeeId ?? '')
+  const [active, setActive] = useState(task?.active ?? specialTask?.active ?? true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Recurrence state
-  const parsed = task ? parseRuleToPreset(task.rrule) : { type: 'daily' as RecurrenceType }
+  // Recurrence state (for both regular and special tasks now)
+  const rruleSource = task?.rrule ?? specialTask?.rrule
+  const parsed = rruleSource ? parseRuleToPreset(rruleSource) : { type: 'daily' as RecurrenceType }
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>(parsed.type)
   const [weeklyDays, setWeeklyDays] = useState<number[]>(parsed.days ?? [0, 1, 2, 3, 4])
   const [monthDay, setMonthDay] = useState(parsed.monthDay ?? 1)
-  const [customRrule, setCustomRrule] = useState(parsed.type === 'custom' ? task?.rrule ?? '' : '')
+  const [customRrule, setCustomRrule] = useState(parsed.type === 'custom' ? rruleSource ?? '' : '')
   const [showRecurrenceDialog, setShowRecurrenceDialog] = useState(false)
   const [customConfig, setCustomConfig] = useState<RecurrenceConfig | null>(
-    parsed.type === 'custom' && task?.rrule ? parseRruleToConfig(task.rrule) : null
+    parsed.type === 'custom' && rruleSource ? parseRruleToConfig(rruleSource) : null
   )
+
+  // Special task state
+  const [dueDays, setDueDays] = useState(specialTask?.dueDays ?? 7)
+
+  // Disable type switching when editing
+  const isEditing = task !== null || specialTask !== null
 
   const getRrule = (): string => {
     switch (recurrenceType) {
@@ -306,25 +488,52 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
 
     try {
       const rrule = getRrule()
-      const url = task ? `/api/tasks/${task.id}` : '/api/tasks'
-      const method = task ? 'PUT' : 'POST'
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          description: description || null,
-          category,
-          employeeId: employeeId || null,
-          rrule,
-          active,
-        }),
-      })
+      if (isSpecial) {
+        // Create/update special task
+        const url = specialTask ? `/api/special-tasks/${specialTask.id}` : '/api/special-tasks'
+        const method = specialTask ? 'PUT' : 'POST'
 
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || 'Erro ao salvar')
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            description: description || null,
+            category,
+            employeeId: employeeId || null,
+            rrule,
+            dueDays,
+            active,
+          }),
+        })
+
+        if (!res.ok) {
+          const data = await res.json()
+          throw new Error(data.error || 'Erro ao salvar')
+        }
+      } else {
+        // Create/update recurring task
+        const url = task ? `/api/tasks/${task.id}` : '/api/tasks'
+        const method = task ? 'PUT' : 'POST'
+
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            description: description || null,
+            category,
+            employeeId: employeeId || null,
+            rrule,
+            active,
+          }),
+        })
+
+        if (!res.ok) {
+          const data = await res.json()
+          throw new Error(data.error || 'Erro ao salvar')
+        }
       }
 
       onSuccess()
@@ -355,12 +564,48 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
         </div>
       )}
 
+      {/* Task Type Toggle (only for new tasks) */}
+      {!isEditing && (
+        <div>
+          <label className="block text-sm font-medium mb-2">Tipo de tarefa</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setIsSpecial(false)}
+              className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                !isSpecial
+                  ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+                  : 'bg-[var(--secondary)] text-[var(--secondary-foreground)]'
+              }`}
+            >
+              Recorrente
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsSpecial(true)}
+              className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isSpecial
+                  ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+                  : 'bg-[var(--secondary)] text-[var(--secondary-foreground)]'
+              }`}
+            >
+              Especial (com prazo)
+            </button>
+          </div>
+          <p className="text-xs text-[var(--muted-foreground)] mt-1">
+            {isSpecial
+              ? 'Tarefa com prazo para conclusão. Quando aparece na agenda, tem X dias para ser concluída.'
+              : 'Tarefa que deve ser concluída no mesmo dia em que aparece.'}
+          </p>
+        </div>
+      )}
+
       <div>
         <label className="block text-sm font-medium mb-1">Título *</label>
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Ex: Limpar cozinha"
+          placeholder={isSpecial ? 'Ex: Limpar filtros do ar-condicionado' : 'Ex: Limpar cozinha'}
           required
           maxLength={100}
         />
@@ -409,8 +654,11 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
         </select>
       </div>
 
+      {/* Recurrence (for both task types) */}
       <div>
-        <label className="block text-sm font-medium mb-2">Recorrência *</label>
+        <label className="block text-sm font-medium mb-2">
+          {isSpecial ? 'Quando aparece na agenda *' : 'Recorrência *'}
+        </label>
         <div className="space-y-2">
           <label className="flex items-center gap-2">
             <input
@@ -535,7 +783,26 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
         </div>
       </div>
 
-      {task && (
+      {/* Special task: Due Days */}
+      {isSpecial && (
+        <div>
+          <label className="block text-sm font-medium mb-1">Prazo para conclusão (dias) *</label>
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={dueDays}
+            onChange={(e) => setDueDays(parseInt(e.target.value) || 7)}
+            className="w-24 h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
+          />
+          <p className="text-xs text-[var(--muted-foreground)] mt-1">
+            Quando a tarefa aparece na agenda, terá {dueDays} dia{dueDays > 1 ? 's' : ''} para ser concluída.
+          </p>
+        </div>
+      )}
+
+      {/* Active toggle (for editing) */}
+      {isEditing && (
         <div className="flex items-center gap-2">
           <input
             type="checkbox"
@@ -555,7 +822,7 @@ function TaskForm({ task, employees, onSuccess, onCancel }: TaskFormProps) {
           Cancelar
         </Button>
         <Button type="submit" disabled={submitting}>
-          {submitting ? 'Salvando...' : task ? 'Salvar' : 'Criar'}
+          {submitting ? 'Salvando...' : (task || specialTask) ? 'Salvar' : 'Criar'}
         </Button>
       </div>
 

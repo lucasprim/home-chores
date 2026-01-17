@@ -5,9 +5,9 @@ import { LogoutButton } from '@/components/logout-button'
 const navItems = [
   { href: '/today', label: 'Hoje', icon: '📋' },
   { href: '/tasks', label: 'Tarefas', icon: '✅' },
-  { href: '/employees', label: 'Funcionários', icon: '👥' },
   { href: '/menu', label: 'Cardápio', icon: '🍽️' },
   { href: '/print', label: 'Imprimir', icon: '🖨️' },
+  { href: '/employees', label: 'Funcionários', icon: '👥' },
   { href: '/settings', label: 'Configurações', icon: '⚙️' },
 ]
 

@@ -42,13 +42,13 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     >
       <div
-        className="w-full max-w-md rounded-xl bg-[var(--background)] shadow-xl animate-in fade-in zoom-in-95 duration-200"
+        className="w-full max-w-md max-h-[90vh] flex flex-col rounded-xl bg-[var(--background)] shadow-xl animate-in fade-in zoom-in-95 duration-200"
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? 'modal-title' : undefined}
       >
         {title && (
-          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] flex-shrink-0">
             <h2 id="modal-title" className="text-lg font-semibold">
               {title}
             </h2>
@@ -73,7 +73,7 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
             </button>
           </div>
         )}
-        <div className="p-4">{children}</div>
+        <div className="p-4 overflow-y-auto">{children}</div>
       </div>
     </div>
   )

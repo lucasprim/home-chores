@@ -1,17 +1,29 @@
 # Home Chores - Especificações
 
-Sistema de gerenciamento de tarefas domésticas e funcionários para automação residencial.
+Sistema de **geração de listas impressas** para tarefas domésticas e cardápios.
 
 ## Visão Geral
 
-O Home Chores é uma aplicação web para gerenciar tarefas domésticas, funcionários e cardápios. O sistema permite:
+O Home Chores é um **gerador de listas para impressão térmica** - **NÃO** é um gerenciador de tarefas tradicional com estados pendente/fazendo/concluído.
 
-- Gerenciar funcionários (faxineira, cozinheira, etc.)
-- Criar e atribuir tarefas com recorrência
-- Visualizar tarefas do dia por funcionário
-- Planejar cardápios mensais
-- Imprimir listas de tarefas em impressora térmica
-- Automatizar impressão diária de tarefas
+### Conceito Fundamental
+
+Este sistema decide **o que será impresso** em uma impressora térmica para um determinado dia. Não há feedback do sistema sobre conclusão de tarefas - por design, pois não há tablets espalhados pela casa para marcar tarefas como concluídas.
+
+### O que o sistema faz:
+
+- **Gerenciar funcionários** (faxineira, cozinheira, etc.) e seus dias de trabalho
+- **Definir tarefas recorrentes** - a recorrência determina em quais dias a tarefa aparece na lista impressa
+- **Definir tarefas especiais** - tarefas que imprimem em papel separado, com data de vencimento informativa
+- **Visualizar preview** - ver o que será impresso para qualquer data
+- **Planejar cardápios** mensais
+- **Imprimir listas** de tarefas em impressora térmica (manual ou automático)
+
+### O que o sistema NÃO faz:
+
+- Rastrear se tarefas foram concluídas
+- Manter estados de tarefas (pendente/fazendo/concluído)
+- Vincular tarefas a datas específicas após impressão
 
 ## Estrutura da Documentação
 
@@ -45,12 +57,13 @@ specifications/
 | Termo | Descrição |
 |-------|-----------|
 | **Funcionário** | Pessoa que trabalha na casa (faxineira, cozinheira, etc.) |
-| **Tarefa** | Atividade a ser realizada (limpar cozinha, lavar roupa, etc.) |
-| **Ocorrência** | Instância específica de uma tarefa em uma data |
-| **Recorrência** | Padrão de repetição de uma tarefa (diária, semanal, etc.) |
+| **Tarefa** | Atividade recorrente com padrão de repetição (limpar cozinha diariamente, lavar roupa seg/qua/sex, etc.) |
+| **Tarefa Especial** | Tarefa que imprime em papel separado, com data de vencimento informativa (ex: "Limpar vidros - Vence: 20/01") |
+| **Recorrência (RRULE)** | Padrão que determina em quais dias uma tarefa aparece na lista impressa. Armazenado como string, parseado em runtime. |
+| **Fuso Horário** | Configuração que define como interpretar datas para cálculo de recorrência |
 | **Cardápio** | Plano de refeições para um período |
 | **Prato** | Item do repertório de refeições da casa |
-| **Impressão Automática** | Job agendado para imprimir tarefas automaticamente |
+| **Print Job** | Job agendado para imprimir tarefas automaticamente em horários específicos |
 | **ESC/POS** | Protocolo de comunicação com impressoras térmicas |
 
 ## Convenções

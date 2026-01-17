@@ -8,11 +8,11 @@ async function main() {
   // Settings padrão
   await prisma.settings.createMany({
     data: [
-      { key: 'house_name', value: '"Minha Casa"' },
-      { key: 'printer_ip', value: '"192.168.1.230"' },
-      { key: 'printer_type', value: '"EPSON"' },
-      { key: 'app_pin', value: '"1234"' },
-      { key: 'default_print_time', value: '"07:00"' },
+      { key: 'house_name', value: 'Minha Casa' },
+      { key: 'printer_ip', value: '192.168.1.230' },
+      { key: 'printer_type', value: 'EPSON' },
+      { key: 'app_pin', value: '1234' },
+      { key: 'timezone', value: 'America/Sao_Paulo' },
     ],
     skipDuplicates: true,
   })

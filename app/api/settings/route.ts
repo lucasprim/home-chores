@@ -5,7 +5,7 @@ const DEFAULT_SETTINGS = {
   house_name: 'Minha Casa',
   printer_ip: '192.168.1.230',
   printer_type: 'EPSON',
-  default_print_time: '07:00',
+  timezone: 'America/Sao_Paulo',
 }
 
 type SettingsKey = keyof typeof DEFAULT_SETTINGS
@@ -30,9 +30,28 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const allowedKeys: SettingsKey[] = ['house_name', 'printer_ip', 'printer_type', 'default_print_time']
+    const allowedKeys: SettingsKey[] = ['house_name', 'printer_ip', 'printer_type', 'timezone']
 
     const updates: { key: string; value: string }[] = []
+
+    // Valid timezone identifiers (common ones for Brazil)
+    const validTimezones = [
+      'America/Sao_Paulo',
+      'America/Fortaleza',
+      'America/Recife',
+      'America/Bahia',
+      'America/Manaus',
+      'America/Cuiaba',
+      'America/Porto_Velho',
+      'America/Boa_Vista',
+      'America/Rio_Branco',
+      'America/Belem',
+      'America/Maceio',
+      'America/Araguaina',
+      'America/Campo_Grande',
+      'America/Noronha',
+      'America/Santarem',
+    ]
 
     for (const key of allowedKeys) {
       if (body[key] !== undefined) {
@@ -50,8 +69,8 @@ export async function PUT(request: NextRequest) {
           return NextResponse.json({ error: 'Tipo de impressora inválido' }, { status: 400 })
         }
 
-        if (key === 'default_print_time' && !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
-          return NextResponse.json({ error: 'Horário inválido' }, { status: 400 })
+        if (key === 'timezone' && !validTimezones.includes(value)) {
+          return NextResponse.json({ error: 'Fuso horário inválido' }, { status: 400 })
         }
 
         updates.push({ key, value })

@@ -1,6 +1,11 @@
 # Home Chores
 
-Web app for managing home employees, tasks, and meal planning with thermal printer integration.
+**Print list generator** for home tasks and meal planning with thermal printer integration.
+
+> **IMPORTANT**: This is NOT a task tracker. It's a print list generator.
+> - Recurrence (rrule) determines which day a task appears on the print list
+> - There is NO completion tracking - no pending/doing/done states
+> - The system decides what gets printed, not what has been done
 
 ## Quick Start for Claude
 
@@ -34,10 +39,7 @@ Use `pnpm` (not npm)
 
 ## Implementation Status
 
-- [x] Specifications complete (see `specifications/`)
-- [ ] Phase 1: Foundation
-- [ ] Phase 2: Core Data (Employees, Settings)
-- [ ] Phase 3: Main Features (Tasks, Today, Print)
-- [ ] Phase 4: Additional (Menu, Auto-print)
+- [x] All phases complete - app is fully functional
+- [x] Employees, Tasks, Special Tasks, Today Preview, Print, Menu, Settings
 
-See `IMPLEMENTATION.md` for detailed progress.
+See `IMPLEMENTATION.md` for detailed progress and recent changes.

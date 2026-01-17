@@ -21,6 +21,7 @@ model Employee {
   updatedAt DateTime @updatedAt
 
   tasks         Task[]
+  specialTasks  SpecialTask[]
   mealSchedules MealSchedule[]
   printJobs     PrintJob[]
 
@@ -47,14 +48,13 @@ model Task {
   title       String
   description String?
   category    Category
-  rrule       String   // Formato iCalendar RRULE
+  rrule       String   // Formato iCalendar RRULE - armazenado como string, parseado em runtime
   employeeId  String?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  employee    Employee?        @relation(fields: [employeeId], references: [id])
-  occurrences TaskOccurrence[]
+  employee Employee? @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([active])
@@ -76,21 +76,35 @@ enum Category {
   @@map("category")
 }
 
-model TaskOccurrence {
-  id          String    @id @default(cuid())
-  taskId      String
-  date        DateTime  @db.Date
-  completed   Boolean   @default(false)
-  completedAt DateTime?
-  notes       String?
+// NOTE: No TaskOccurrence model - this system does not track task completion.
+// Tasks are simply printed based on their rrule pattern.
 
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+// ============================================
+// TAREFAS ESPECIAIS (Tasks that print on separate paper with due date info)
+// ============================================
 
-  @@unique([taskId, date])
-  @@index([date])
-  @@index([taskId, date])
-  @@map("task_occurrences")
+// Special tasks print on their own paper with a due date shown as info
+model SpecialTask {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    Category
+  rrule       String   // Formato iCalendar RRULE - when task appears on print list
+  dueDays     Int      @default(7) // Days to show as "due date" on print (informational only)
+  employeeId  String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee Employee? @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@index([active])
+  @@map("special_tasks")
 }
+
+// NOTE: No SpecialTaskOccurrence model - this system does not track task completion.
+// Special tasks are printed based on their rrule pattern, with dueDays shown as info.
 
 // ============================================
 // CARDÁPIO

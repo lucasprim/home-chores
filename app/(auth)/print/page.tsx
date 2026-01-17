@@ -12,17 +12,45 @@ interface Employee {
   role: Role
 }
 
-interface PreviewGroup {
-  employee: { name: string; role: string } | null
-  tasks: { title: string; description: string | null }[]
-}
+// Multi-page preview types
+type PreviewPage =
+  | {
+      type: 'UNASSIGNED_TASKS'
+      title: string
+      tasks: { title: string; description: string | null }[]
+    }
+  | {
+      type: 'EMPLOYEE_TASKS'
+      title: string
+      employee: { name: string; role: string }
+      tasks: { title: string; description: string | null }[]
+    }
+  | {
+      type: 'MENU'
+      title: string
+      lunch?: string
+      dinner?: string
+    }
+  | {
+      type: 'SPECIAL_TASK'
+      title: string
+      task: {
+        title: string
+        description: string | null
+        dueDate: string
+        daysRemaining: number
+        category: string
+      }
+    }
 
 interface DailyTasksPreview {
   type: 'DAILY_TASKS'
   houseName: string
   date: string
-  groups: PreviewGroup[]
+  pages: PreviewPage[]
   totalTasks: number
+  totalSpecialTasks: number
+  hasMenu: boolean
 }
 
 interface WeeklyMenuPreview {
@@ -41,7 +69,11 @@ type PrintPreview = DailyTasksPreview | WeeklyMenuPreview
 type PrintType = 'DAILY_TASKS' | 'WEEKLY_MENU'
 
 function getDateString(date: Date): string {
-  return date.toISOString().split('T')[0] ?? ''
+  // Use local date parts to avoid timezone issues
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 export default function PrintPage() {
@@ -59,6 +91,7 @@ function PrintPageContent() {
   const [printType, setPrintType] = useState<PrintType>('DAILY_TASKS')
   const [date, setDate] = useState(dateParam || getDateString(new Date()))
   const [employeeId, setEmployeeId] = useState('')
+  const [includeSpecialTasks, setIncludeSpecialTasks] = useState(true)
   const [employees, setEmployees] = useState<Employee[]>([])
   const [preview, setPreview] = useState<PrintPreview | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
@@ -89,6 +122,9 @@ function PrintPageContent() {
       if (employeeId && printType === 'DAILY_TASKS') {
         params.set('employeeId', employeeId)
       }
+      if (printType === 'DAILY_TASKS') {
+        params.set('includeSpecialTasks', String(includeSpecialTasks))
+      }
 
       const res = await fetch(`/api/print/preview?${params}`)
       if (!res.ok) {
@@ -103,7 +139,7 @@ function PrintPageContent() {
     } finally {
       setLoadingPreview(false)
     }
-  }, [printType, date, employeeId])
+  }, [printType, date, employeeId, includeSpecialTasks])
 
   useEffect(() => {
     fetchEmployees()
@@ -126,6 +162,7 @@ function PrintPageContent() {
           type: printType,
           date,
           employeeId: employeeId || undefined,
+          includeSpecialTasks,
         }),
       })
 
@@ -137,12 +174,19 @@ function PrintPageContent() {
 
       setSuccess(data.message || 'Impresso com sucesso!')
       setTimeout(() => setSuccess(null), 5000)
+      // Refresh preview to update printedAt status
+      fetchPreview()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao imprimir')
     } finally {
       setPrinting(false)
     }
   }
+
+  const canPrint = preview && (
+    preview.type === 'WEEKLY_MENU' ||
+    (preview.type === 'DAILY_TASKS' && preview.pages.length > 0)
+  )
 
   return (
     <div className="space-y-4">
@@ -197,34 +241,53 @@ function PrintPageContent() {
           </div>
 
           {printType === 'DAILY_TASKS' && (
-            <div>
-              <label className="block text-sm font-medium mb-1">Funcionário</label>
-              <select
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                className="w-full h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
-              >
-                <option value="">Todos</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium mb-1">Funcionário</label>
+                <select
+                  value={employeeId}
+                  onChange={(e) => setEmployeeId(e.target.value)}
+                  className="w-full h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
+                >
+                  <option value="">Todos</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={includeSpecialTasks}
+                  onChange={(e) => setIncludeSpecialTasks(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <span className="text-sm">Incluir tarefas especiais</span>
+              </label>
+            </>
           )}
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader>
-          <CardTitle>Preview</CardTitle>
+          <CardTitle className="flex items-center justify-between">
+            <span>Preview</span>
+            {preview?.type === 'DAILY_TASKS' && preview.pages.length > 0 && (
+              <span className="text-sm font-normal text-[var(--muted-foreground)]">
+                {preview.pages.length} página{preview.pages.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {loadingPreview ? (
             <div className="text-center py-4 text-[var(--muted-foreground)]">Carregando...</div>
           ) : preview ? (
-            <div className="bg-[var(--secondary)] rounded-lg p-4 font-mono text-sm overflow-auto max-h-96">
+            <div className="bg-[var(--secondary)] rounded-lg p-4 font-mono text-sm overflow-auto max-h-[600px]">
               <PreviewContent preview={preview} />
             </div>
           ) : (
@@ -236,10 +299,7 @@ function PrintPageContent() {
       </Card>
 
       <div className="flex justify-end">
-        <Button
-          onClick={handlePrint}
-          disabled={printing || !preview || (preview.type === 'DAILY_TASKS' && preview.totalTasks === 0)}
-        >
+        <Button onClick={handlePrint} disabled={printing || !canPrint}>
           {printing ? 'Imprimindo...' : 'Imprimir'}
         </Button>
       </div>
@@ -249,40 +309,30 @@ function PrintPageContent() {
 
 function PreviewContent({ preview }: { preview: PrintPreview }) {
   if (preview.type === 'DAILY_TASKS') {
+    if (preview.pages.length === 0) {
+      return (
+        <div className="text-center text-[var(--muted-foreground)]">
+          Nenhuma tarefa, cardápio ou tarefa especial para este dia
+        </div>
+      )
+    }
+
     return (
-      <div className="text-center">
-        <div className="font-bold text-lg">{preview.houseName.toUpperCase()}</div>
-        <div>════════════════════════════════</div>
-        <div className="font-bold mt-2">TAREFAS - {preview.date}</div>
-        <div className="mt-2"></div>
-
-        {preview.groups.length === 0 ? (
-          <div className="text-[var(--muted-foreground)] mt-4">Nenhuma tarefa para este dia</div>
-        ) : (
-          preview.groups.map((group, index) => (
-            <div key={index} className="mt-4 text-left">
-              <div>────────────────────────────────</div>
-              <div className="font-bold">{group.employee?.name?.toUpperCase() ?? 'SEM ATRIBUIÇÃO'}</div>
-              <div className="mt-1"></div>
-              {group.tasks.map((task, i) => (
-                <div key={i}>
-                  <div>[ ] {task.title}</div>
-                  {task.description && (
-                    <div className="ml-4 text-[var(--muted-foreground)]">{task.description}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))
-        )}
-
-        {preview.totalTasks > 0 && (
-          <>
-            <div className="mt-4">────────────────────────────────</div>
-            <div>{preview.totalTasks} tarefas - Bom trabalho!</div>
-            <div>════════════════════════════════</div>
-          </>
-        )}
+      <div className="space-y-6">
+        {preview.pages.map((page, index) => (
+          <div key={index}>
+            {index > 0 && (
+              <div className="flex items-center gap-2 my-4 text-[var(--muted-foreground)]">
+                <div className="flex-1 border-t border-dashed border-[var(--border)]" />
+                <span className="text-xs flex items-center gap-1">
+                  ✂️ corte parcial
+                </span>
+                <div className="flex-1 border-t border-dashed border-[var(--border)]" />
+              </div>
+            )}
+            <PagePreview page={page} houseName={preview.houseName} date={preview.date} />
+          </div>
+        ))}
       </div>
     )
   }
@@ -291,21 +341,106 @@ function PreviewContent({ preview }: { preview: PrintPreview }) {
     return (
       <div className="text-center">
         <div className="font-bold text-lg">{preview.houseName.toUpperCase()}</div>
-        <div>════════════════════════════════</div>
+        <div>================================</div>
         <div className="font-bold mt-2">CARDÁPIO DA SEMANA</div>
         <div>{preview.period}</div>
         <div className="mt-2"></div>
 
         {preview.days.map((day, index) => (
-          <div key={index} className="mt-3 text-left">
-            <div>────────────────────────────────</div>
+          <div key={index} className="mt-3">
+            <div>--------------------------------</div>
             <div className="font-bold uppercase">{day.date}</div>
             <div>Almoço: {day.lunch ?? '(não definido)'}</div>
             <div>Jantar: {day.dinner ?? '(não definido)'}</div>
           </div>
         ))}
 
-        <div className="mt-4">════════════════════════════════</div>
+        <div className="mt-4">================================</div>
+      </div>
+    )
+  }
+
+  return null
+}
+
+function PagePreview({ page, houseName, date }: { page: PreviewPage; houseName: string; date: string }) {
+  if (page.type === 'UNASSIGNED_TASKS' || page.type === 'EMPLOYEE_TASKS') {
+    const title = page.type === 'UNASSIGNED_TASKS' ? 'TAREFAS GERAIS' : page.title.toUpperCase()
+    return (
+      <div className="text-center">
+        <div className="font-bold text-lg">{houseName.toUpperCase()}</div>
+        <div>================================</div>
+        <div className="font-bold mt-2">{title}</div>
+        <div className="text-xs">{date}</div>
+        <div className="mt-2">
+          {page.tasks.map((task, i) => (
+            <div key={i}>
+              <div>[ ] {task.title}</div>
+              {task.description && (
+                <div className="text-[var(--muted-foreground)]">{task.description}</div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="mt-2">
+          <div>{page.tasks.length} tarefa{page.tasks.length !== 1 ? 's' : ''}</div>
+        </div>
+        <div>================================</div>
+      </div>
+    )
+  }
+
+  if (page.type === 'MENU') {
+    return (
+      <div className="text-center">
+        <div className="font-bold text-lg">{houseName.toUpperCase()}</div>
+        <div>================================</div>
+        <div className="font-bold mt-2">CARDÁPIO DO DIA</div>
+        <div className="text-xs">{date}</div>
+        <div className="mt-2">
+          {page.lunch && (
+            <div>
+              <span className="font-bold">Almoço:</span> {page.lunch}
+            </div>
+          )}
+          {page.dinner && (
+            <div>
+              <span className="font-bold">Jantar:</span> {page.dinner}
+            </div>
+          )}
+        </div>
+        <div className="mt-2">================================</div>
+      </div>
+    )
+  }
+
+  if (page.type === 'SPECIAL_TASK') {
+    const { task } = page
+    const daysLabel = task.daysRemaining < 0
+      ? `ATRASADA ${Math.abs(task.daysRemaining)} dia${Math.abs(task.daysRemaining) !== 1 ? 's' : ''}!`
+      : task.daysRemaining === 0
+      ? 'VENCE HOJE!'
+      : task.daysRemaining === 1
+      ? 'VENCE AMANHÃ!'
+      : `${task.daysRemaining} dias restantes`
+
+    return (
+      <div className="text-center">
+        <div className="text-yellow-600 dark:text-yellow-400">****************************</div>
+        <div className="font-bold text-lg mt-1">TAREFA ESPECIAL</div>
+        <div className="text-yellow-600 dark:text-yellow-400">****************************</div>
+        <div className="font-bold mt-2">{houseName.toUpperCase()}</div>
+        <div className="mt-2 font-bold text-lg">[ ] {task.title.toUpperCase()}</div>
+        {task.description && (
+          <div className="mt-2 text-[var(--muted-foreground)]">{task.description}</div>
+        )}
+        <div className="mt-3 font-bold">
+          <div>VENCE: {task.dueDate}</div>
+          <div className={task.daysRemaining <= 2 ? 'text-orange-600 dark:text-orange-400' : ''}>
+            ({daysLabel})
+          </div>
+        </div>
+        <div className="mt-2 text-yellow-600 dark:text-yellow-400">****************************</div>
       </div>
     )
   }

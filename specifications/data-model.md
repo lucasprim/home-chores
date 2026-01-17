@@ -1,5 +1,8 @@
 # Modelo de Dados
 
+> **IMPORTANTE**: Este sistema é um **gerador de listas para impressão** - não rastreia estados de tarefas.
+> A recorrência (rrule) determina apenas em quais dias uma tarefa aparece na lista impressa.
+
 ## Diagrama ER
 
 ```
@@ -10,23 +13,24 @@
 │ name            │   │   │ title           │
 │ role            │   │   │ description     │
 │ workDays        │   │   │ category        │
-│ active          │   │   │ rrule           │
+│ active          │   │   │ rrule (string)  │  ← Parseado em runtime
 │ createdAt       │   └──▶│ employeeId      │
 │ updatedAt       │       │ active          │
 └─────────────────┘       │ createdAt       │
                           │ updatedAt       │
-                          └────────┬────────┘
-                                   │
-                                   ▼
-                          ┌─────────────────┐
-                          │ TaskOccurrence  │
-                          ├─────────────────┤
-                          │ id              │
-                          │ taskId          │
-                          │ date            │
-                          │ completed       │
-                          │ completedAt     │
-                          │ notes           │
+                          └─────────────────┘
+
+┌─────────────────┐       ┌─────────────────┐
+│    Employee     │       │   SpecialTask   │
+├─────────────────┤       ├─────────────────┤
+│      ...        │───┐   │ id              │
+└─────────────────┘   │   │ title           │
+                      │   │ description     │
+                      │   │ category        │
+                      │   │ rrule (string)  │  ← Parseado em runtime
+                      │   │ dueDays         │  ← Dias até vencimento (info)
+                      └──▶│ employeeId      │
+                          │ active          │
                           └─────────────────┘
 
 ┌─────────────────┐       ┌─────────────────┐
@@ -123,18 +127,37 @@ model Task {
   title       String
   description String?
   category    Category
-  rrule       String   // Formato iCalendar RRULE
+  rrule       String   // Formato iCalendar RRULE - armazenado como string, parseado em runtime
   employeeId  String?
   active      Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  employee    Employee?        @relation(fields: [employeeId], references: [id])
-  occurrences TaskOccurrence[]
+  employee Employee? @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([active])
   @@map("tasks")
+}
+
+// Tarefas especiais - imprimem em papel separado com data de vencimento informativa
+model SpecialTask {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  category    Category
+  rrule       String   // Quando a tarefa aparece (ex: FREQ=MONTHLY;BYMONTHDAY=1)
+  dueDays     Int      @default(7) // Dias para calcular vencimento (apenas informativo na impressão)
+  employeeId  String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee Employee? @relation(fields: [employeeId], references: [id])
+
+  @@index([employeeId])
+  @@index([active])
+  @@map("special_tasks")
 }
 
 enum Category {
@@ -152,21 +175,8 @@ enum Category {
   @@map("category")
 }
 
-model TaskOccurrence {
-  id          String    @id @default(cuid())
-  taskId      String
-  date        DateTime  @db.Date
-  completed   Boolean   @default(false)
-  completedAt DateTime?
-  notes       String?
-
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@unique([taskId, date])
-  @@index([date])
-  @@index([taskId, date])
-  @@map("task_occurrences")
-}
+// NOTE: No TaskOccurrence model - this system does not track task completion.
+// Tasks are simply printed based on their rrule pattern.
 
 // ============================================
 // CARDÁPIO
@@ -243,7 +253,7 @@ model Settings {
 // - printer_ip: IP da impressora térmica
 // - printer_type: Tipo da impressora (EPSON, STAR, etc)
 // - app_pin: PIN de acesso ao app
-// - default_print_time: Horário padrão para impressão automática
+// - timezone: Fuso horário para cálculo de recorrência (ex: "America/Sao_Paulo")
 
 // ============================================
 // IMPRESSÃO
@@ -332,25 +342,28 @@ enum PrintStatus {
 
 **Regras:**
 - Título é obrigatório
-- rrule segue formato iCalendar (RFC 5545)
+- rrule segue formato iCalendar (RFC 5545) - armazenado como string, parseado em runtime
 - Tarefa sem employeeId é não atribuída
-- Tarefa inativa não gera ocorrências
+- Tarefa inativa não aparece nas listas impressas
 
-### TaskOccurrence (Ocorrência)
+### SpecialTask (Tarefa Especial)
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
 | id | string | ID único (CUID) |
-| taskId | string | ID da tarefa |
-| date | date | Data da ocorrência |
-| completed | boolean | Se foi concluída |
-| completedAt | datetime? | Quando foi concluída |
-| notes | string? | Observações |
+| title | string | Título da tarefa |
+| description | string? | Descrição detalhada |
+| category | Category | Categoria da tarefa |
+| rrule | string | Regra de recorrência (quando aparece) |
+| dueDays | int | Dias até vencimento (apenas informativo) |
+| employeeId | string? | Funcionário responsável |
+| active | boolean | Se está ativa |
 
 **Regras:**
-- Combinação taskId + date é única
-- Ocorrências são criadas sob demanda (lazy)
-- completedAt é preenchido automaticamente ao marcar completed
+- Título é obrigatório
+- rrule define quando a tarefa aparece na lista de impressão
+- dueDays é apenas informativo - aparece na impressão como "Vence: DD/MM"
+- Imprime em papel separado (ticket individual)
 
 ### Dish (Prato)
 
@@ -398,7 +411,7 @@ enum PrintStatus {
 - `printer_ip`: IP da impressora
 - `printer_type`: Tipo da impressora
 - `app_pin`: PIN de acesso
-- `default_print_time`: Horário padrão
+- `timezone`: Fuso horário para cálculo de recorrência (ex: "America/Sao_Paulo")
 
 ### PrintJob (Job de Impressão)
 
@@ -468,7 +481,7 @@ async function main() {
       { key: 'printer_ip', value: '"192.168.1.230"' },
       { key: 'printer_type', value: '"EPSON"' },
       { key: 'app_pin', value: '"1234"' },
-      { key: 'default_print_time', value: '"07:00"' },
+      { key: 'timezone', value: '"America/Sao_Paulo"' },
     ],
     skipDuplicates: true,
   })

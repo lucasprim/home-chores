@@ -1,30 +1,28 @@
-# Hoje - Dashboard de Tarefas
+# Hoje - Preview de Impressão
 
 ## Visão Geral
 
-Tela principal que exibe as tarefas do dia organizadas por funcionário. É a página inicial após login.
+Tela de **preview** que mostra o que será impresso para um determinado dia. Esta é uma tela **somente leitura** - não há rastreamento de conclusão de tarefas.
+
+> **IMPORTANTE**: Este sistema é um gerador de listas para impressão térmica.
+> A página "Hoje" mostra o que seria impresso, não rastreia progresso.
 
 ## User Stories
 
-### US-01: Ver tarefas do dia
+### US-01: Ver preview do dia
 **Como** usuário
-**Quero** ver todas as tarefas programadas para hoje
-**Para** acompanhar o que precisa ser feito
+**Quero** ver todas as tarefas que seriam impressas para uma data
+**Para** verificar o que vai na lista antes de imprimir
 
-### US-02: Marcar tarefa como concluída
+### US-02: Navegar entre dias
 **Como** usuário
-**Quero** marcar tarefas como concluídas
-**Para** acompanhar o progresso do dia
+**Quero** ver o preview de outros dias
+**Para** verificar tarefas futuras ou passadas
 
-### US-03: Filtrar por funcionário
+### US-03: Imprimir direto
 **Como** usuário
-**Quero** ver tarefas de um funcionário específico
-**Para** verificar a carga de trabalho individual
-
-### US-04: Navegar entre dias
-**Como** usuário
-**Quero** ver tarefas de outros dias
-**Para** planejar ou revisar tarefas passadas
+**Quero** imprimir a lista do dia a partir do preview
+**Para** ter acesso rápido à impressão
 
 ## Wireframe
 
@@ -33,32 +31,34 @@ Tela principal que exibe as tarefas do dia organizadas por funcionário. É a p�
 │  ← Hoje, 16 de Janeiro →                    [Imprimir] │
 ├────────────────────────────────────────────────────────┤
 │                                                        │
-│  ┌─ Maria (Faxineira) ──────────────── 2/5 ─────────┐ │
+│  ┌─ Maria (Faxineira) ─────────────── 5 tarefas ────┐ │
 │  │                                                   │ │
-│  │  [✓] Limpar cozinha                              │ │
-│  │  [✓] Lavar banheiro                              │ │
-│  │  [ ] Passar roupa                                │ │
-│  │  [ ] Organizar quartos                           │ │
-│  │  [ ] Limpar sala                                 │ │
-│  │                                                   │ │
-│  └───────────────────────────────────────────────────┘ │
-│                                                        │
-│  ┌─ Joana (Cozinheira) ─────────────── 1/3 ─────────┐ │
-│  │                                                   │ │
-│  │  [✓] Preparar almoço                             │ │
-│  │  [ ] Fazer lista de compras                      │ │
-│  │  [ ] Preparar jantar                             │ │
+│  │  • Limpar cozinha                                │ │
+│  │  • Lavar banheiro                                │ │
+│  │  • Passar roupa                                  │ │
+│  │  • Organizar quartos                             │ │
+│  │  • Limpar sala                                   │ │
 │  │                                                   │ │
 │  └───────────────────────────────────────────────────┘ │
 │                                                        │
-│  ┌─ Sem funcionário atribuído ──────── 0/1 ─────────┐ │
+│  ┌─ Joana (Cozinheira) ─────────────── 3 tarefas ───┐ │
 │  │                                                   │ │
-│  │  [ ] Regar plantas                               │ │
+│  │  • Preparar almoço                               │ │
+│  │  • Fazer lista de compras                        │ │
+│  │  • Preparar jantar                               │ │
+│  │                                                   │ │
+│  └───────────────────────────────────────────────────┘ │
+│                                                        │
+│  ┌─ Tarefas Especiais ──────────────────────────────┐ │
+│  │                                                   │ │
+│  │  📋 Limpar vidros (Vence: 20/01)                 │ │
 │  │                                                   │ │
 │  └───────────────────────────────────────────────────┘ │
 │                                                        │
 └────────────────────────────────────────────────────────┘
 ```
+
+**Nota**: Não há checkboxes - esta é uma visualização read-only do que será impresso.
 
 ## Componentes
 
@@ -84,32 +84,27 @@ interface DayHeaderProps {
 ```tsx
 interface EmployeeTaskCardProps {
   employee: Employee | null // null = tarefas sem atribuição
-  tasks: TaskOccurrence[]
-  onToggleTask: (taskId: string, completed: boolean) => void
+  tasks: Task[]
 }
 ```
 
 **Comportamento:**
 - Agrupa tarefas por funcionário
-- Mostra progresso (X/Y tarefas)
-- Permite expandir/colapsar
-- Checkbox para marcar conclusão
+- Mostra contagem de tarefas
+- Read-only (sem interação)
 
 ### Item de Tarefa
 
 ```tsx
 interface TaskItemProps {
-  occurrence: TaskOccurrence
-  onToggle: (completed: boolean) => void
-  onAddNote: (note: string) => void
+  task: Task
 }
 ```
 
 **Comportamento:**
-- Checkbox para marcar conclusão
+- Exibe título da tarefa
 - Ícone da categoria
-- Animação ao completar
-- Long press para adicionar nota
+- Read-only (sem checkbox)
 
 ## Estados
 
@@ -134,22 +129,9 @@ interface TaskItemProps {
 │                                        │
 │           📋                           │
 │                                        │
-│     Nenhuma tarefa para hoje           │
+│     Nenhuma tarefa para este dia       │
 │                                        │
 │     [Criar tarefa]                     │
-│                                        │
-└────────────────────────────────────────┘
-```
-
-### Tudo concluído
-```
-┌────────────────────────────────────────┐
-│  Hoje, 16 de Janeiro           ✓ 100%  │
-├────────────────────────────────────────┤
-│                                        │
-│           ✅                           │
-│                                        │
-│     Todas as tarefas concluídas!       │
 │                                        │
 └────────────────────────────────────────┘
 ```
@@ -159,14 +141,14 @@ interface TaskItemProps {
 ```
 ┌─────────┐     ┌─────────────┐     ┌──────────────┐
 │  Page   │────▶│  GET /api/  │────▶│   Database   │
-│  Load   │     │ occurrences │     │              │
+│  Load   │     │ tasks/today │     │  (Tasks)     │
 └─────────┘     └─────────────┘     └──────────────┘
                      │
                      ▼
               ┌─────────────┐
-              │  Calculate  │
-              │ occurrences │
-              │ from rrule  │
+              │   Filter    │
+              │  by rrule   │
+              │  (runtime)  │
               └─────────────┘
                      │
                      ▼
@@ -176,64 +158,48 @@ interface TaskItemProps {
               └─────────────┘
 ```
 
+**Nota**: O rrule é armazenado como string e parseado em runtime para determinar se a tarefa aparece no dia.
+
 ## API Calls
 
 ### Carregar tarefas do dia
 
 ```typescript
-// GET /api/occurrences?date=2024-01-16
+// GET /api/tasks/for-date?date=2024-01-16
 
-const response = await fetch(`/api/occurrences?date=${date}`)
-const { data } = await response.json()
+const response = await fetch(`/api/tasks/for-date?date=${date}`)
+const { tasks, specialTasks } = await response.json()
 
-// Agrupar por funcionário
-const grouped = groupBy(data, 'task.employeeId')
+// tasks já vem agrupado por funcionário
+// specialTasks são tarefas especiais que aparecem no dia (com dueDate calculado)
 ```
 
-### Marcar tarefa
-
-```typescript
-// PUT /api/occurrences/:id
-// ou POST /api/occurrences (se não existe ainda)
-
-const toggleTask = async (occurrenceId: string | null, taskId: string, date: string, completed: boolean) => {
-  if (occurrenceId) {
-    await fetch(`/api/occurrences/${occurrenceId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ completed })
-    })
-  } else {
-    await fetch('/api/occurrences', {
-      method: 'POST',
-      body: JSON.stringify({ taskId, date, completed })
-    })
-  }
-}
-```
+**Nota**: Não há API de "marcar tarefa" - este sistema não rastreia conclusão.
 
 ## Lógica de Negócio
 
-### Cálculo de ocorrências
+### Determinação de tarefas para uma data
 
 1. Buscar todas as tarefas ativas
-2. Para cada tarefa, verificar se a data corresponde ao rrule
-3. Buscar ocorrências existentes no banco
-4. Mesclar tarefas calculadas com ocorrências existentes
-5. Agrupar por funcionário
+2. Para cada tarefa, verificar se a data corresponde ao rrule (parseado em runtime)
+3. Filtrar por dias de trabalho do funcionário (se atribuído)
+4. Agrupar por funcionário
+5. Repetir para tarefas especiais (calculando dueDate = date + dueDays)
 
 ```typescript
 import { RRule } from 'rrule'
 
-function getTasksForDate(tasks: Task[], date: Date): TaskWithOccurrence[] {
-  return tasks.filter(task => {
-    const rule = RRule.fromString(task.rrule)
-    const occurrences = rule.between(
-      startOfDay(date),
-      endOfDay(date),
-      true
-    )
-    return occurrences.length > 0
-  })
+function isTaskScheduledForDate(rruleString: string, date: Date, timezone: string): boolean {
+  // Parse the rrule string with timezone
+  const rule = RRule.fromString(rruleString)
+  rule.options.tzid = timezone
+
+  const occurrences = rule.between(
+    startOfDay(date),
+    endOfDay(date),
+    true
+  )
+  return occurrences.length > 0
 }
 ```
 
@@ -252,15 +218,9 @@ function filterByWorkDay(tasks: Task[], date: Date): Task[] {
 }
 ```
 
+**Importante**: O timezone é obtido das configurações do sistema para garantir consistência.
+
 ## Interações
-
-### Toggle de tarefa
-
-1. Usuário clica no checkbox
-2. UI atualiza otimisticamente
-3. Animação de conclusão
-4. Request para API
-5. Se erro, reverte UI e mostra toast
 
 ### Navegação de data
 
@@ -273,36 +233,32 @@ function filterByWorkDay(tasks: Task[], date: Date): Task[] {
 ### Impressão rápida
 
 1. Usuário clica "Imprimir"
-2. Modal de confirmação
-3. Se confirma, dispara impressão
+2. Modal de confirmação (opcional)
+3. Dispara impressão para o dia selecionado
 4. Toast de sucesso/erro
 
 ## Acessibilidade
 
-- Checkboxes com labels descritivos
-- Navegação por teclado (Tab, Enter, Space)
-- Anúncios de leitores de tela ao completar
-- Contraste adequado para status
+- Navegação por teclado (Tab, Enter)
+- Leitores de tela com descrições adequadas
+- Contraste adequado para leitura
 
 ## Performance
 
 - Server Component para dados iniciais
-- Otimistic updates para toggle
-- Debounce em atualizações
 - Cache de cálculos de rrule
 - Prefetch de dias adjacentes
 
 ## Testes
 
 ### Unitários
-- Cálculo de ocorrências de rrule
+- Cálculo de tarefas por rrule
 - Agrupamento por funcionário
 - Filtro por dia de trabalho
 
 ### Integração
-- Toggle de tarefa persiste
 - Navegação de data funciona
 - Impressão dispara corretamente
 
 ### E2E
-- Fluxo completo: login → ver tarefas → marcar → imprimir
+- Fluxo completo: login → ver preview → imprimir

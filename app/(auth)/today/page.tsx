@@ -2,28 +2,40 @@
 
 import { Suspense, useState, useEffect, useCallback } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Button, Card, CardHeader, CardTitle, CardContent } from '@/components/ui'
+import { Button, Card, CardHeader, CardTitle, CardContent, Badge } from '@/components/ui'
 import { Category, Role } from '@prisma/client'
 
-interface TaskOccurrence {
-  task: {
+interface Task {
+  id: string
+  title: string
+  description: string | null
+  category: Category
+  employee: {
     id: string
-    title: string
-    description: string | null
-    category: Category
-    employeeId: string | null
-    employee: {
-      id: string
-      name: string
-      role: Role
-    } | null
-  }
-  occurrence: {
-    id: string
-    completed: boolean
-    completedAt: string | null
-    notes: string | null
+    name: string
+    role: Role
   } | null
+}
+
+interface SpecialTask {
+  id: string
+  title: string
+  description: string | null
+  category: Category
+  dueDays: number
+  appearDate: string
+  dueDate: string
+  employee: {
+    id: string
+    name: string
+    role: Role
+  } | null
+}
+
+interface TasksForDateResponse {
+  date: string
+  tasks: Task[]
+  specialTasks: SpecialTask[]
 }
 
 const CATEGORY_ICONS: Record<Category, string> = {
@@ -57,7 +69,10 @@ function formatDate(date: Date): string {
 }
 
 function getDateString(date: Date): string {
-  return date.toISOString().split('T')[0] ?? ''
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function isToday(date: Date): boolean {
@@ -67,6 +82,12 @@ function isToday(date: Date): boolean {
     date.getMonth() === today.getMonth() &&
     date.getFullYear() === today.getFullYear()
   )
+}
+
+function formatDueDate(dueDateStr: string): string {
+  const [year, month, day] = dueDateStr.split('-').map(Number)
+  const dueDate = new Date(year!, month! - 1, day!)
+  return dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
 
 export default function TodayPage() {
@@ -84,24 +105,33 @@ function TodayPageContent() {
   const dateParam = searchParams.get('date')
   const [currentDate, setCurrentDate] = useState(() => {
     if (dateParam) {
-      const parsed = new Date(dateParam)
-      return isNaN(parsed.getTime()) ? new Date() : parsed
+      const parts = dateParam.split('-')
+      if (parts.length === 3) {
+        const [year, month, day] = parts.map(Number)
+        if (year && month && day) {
+          return new Date(year, month - 1, day, 12, 0, 0)
+        }
+      }
     }
     return new Date()
   })
 
-  const [occurrences, setOccurrences] = useState<TaskOccurrence[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
+  const [specialTasks, setSpecialTasks] = useState<SpecialTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchOccurrences = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true)
       const dateStr = getDateString(currentDate)
-      const res = await fetch(`/api/occurrences?date=${dateStr}`)
+
+      const res = await fetch(`/api/tasks/for-date?date=${dateStr}`)
       if (!res.ok) throw new Error('Erro ao carregar tarefas')
-      const data = await res.json()
-      setOccurrences(data)
+
+      const data: TasksForDateResponse = await res.json()
+      setTasks(data.tasks)
+      setSpecialTasks(data.specialTasks)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido')
@@ -111,8 +141,8 @@ function TodayPageContent() {
   }, [currentDate])
 
   useEffect(() => {
-    fetchOccurrences()
-  }, [fetchOccurrences])
+    fetchData()
+  }, [fetchData])
 
   const navigateDate = (delta: number) => {
     const newDate = new Date(currentDate)
@@ -130,85 +160,29 @@ function TodayPageContent() {
     router.replace('/today')
   }
 
-  const toggleTask = async (taskOccurrence: TaskOccurrence) => {
-    const { task, occurrence } = taskOccurrence
-    const newCompleted = !occurrence?.completed
-
-    // Optimistic update
-    setOccurrences((prev) =>
-      prev.map((o) =>
-        o.task.id === task.id
-          ? {
-              ...o,
-              occurrence: {
-                id: occurrence?.id ?? 'temp',
-                completed: newCompleted,
-                completedAt: newCompleted ? new Date().toISOString() : null,
-                notes: occurrence?.notes ?? null,
-              },
-            }
-          : o
-      )
-    )
-
-    try {
-      if (occurrence?.id) {
-        const res = await fetch(`/api/occurrences/${occurrence.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ completed: newCompleted }),
-        })
-        if (!res.ok) throw new Error('Erro ao atualizar')
-      } else {
-        const res = await fetch('/api/occurrences', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            taskId: task.id,
-            date: getDateString(currentDate),
-            completed: newCompleted,
-          }),
-        })
-        if (!res.ok) throw new Error('Erro ao criar')
-        // Refresh to get the real occurrence ID
-        await fetchOccurrences()
-      }
-    } catch (err) {
-      // Revert optimistic update
-      await fetchOccurrences()
-      setError(err instanceof Error ? err.message : 'Erro ao atualizar')
-    }
-  }
-
-  // Group by employee
-  const groupedOccurrences = occurrences.reduce(
-    (acc, o) => {
-      const key = o.task.employee?.id ?? 'unassigned'
+  // Group tasks by employee
+  const groupedTasks = tasks.reduce(
+    (acc, task) => {
+      const key = task.employee?.id ?? 'unassigned'
       if (!acc[key]) {
         acc[key] = {
-          employee: o.task.employee,
+          employee: task.employee,
           tasks: [],
         }
       }
-      acc[key].tasks.push(o)
+      acc[key].tasks.push(task)
       return acc
     },
-    {} as Record<
-      string,
-      {
-        employee: TaskOccurrence['task']['employee']
-        tasks: TaskOccurrence[]
-      }
-    >
+    {} as Record<string, { employee: Task['employee']; tasks: Task[] }>
   )
 
-  const groups = Object.values(groupedOccurrences)
-  const totalTasks = occurrences.length
-  const completedTasks = occurrences.filter((o) => o.occurrence?.completed).length
-  const allCompleted = totalTasks > 0 && completedTasks === totalTasks
+  const groups = Object.values(groupedTasks)
+  const totalTasks = tasks.length
+  const totalSpecialTasks = specialTasks.length
 
   return (
     <div className="space-y-4">
+      {/* Header with date navigation */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => navigateDate(-1)}>
@@ -234,10 +208,15 @@ function TodayPageContent() {
         <Button
           variant="secondary"
           onClick={() => router.push(`/print?date=${getDateString(currentDate)}`)}
-          disabled={totalTasks === 0}
+          disabled={totalTasks === 0 && totalSpecialTasks === 0}
         >
           Imprimir
         </Button>
+      </div>
+
+      {/* Info banner explaining this is a preview */}
+      <div className="p-3 rounded-lg bg-blue-50 text-blue-800 dark:bg-blue-900/20 dark:text-blue-200 text-sm">
+        Preview do que será impresso para este dia
       </div>
 
       {error && (
@@ -248,81 +227,100 @@ function TodayPageContent() {
 
       {loading ? (
         <div className="text-center py-8 text-[var(--muted-foreground)]">Carregando...</div>
-      ) : totalTasks === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <div className="text-4xl mb-4">📋</div>
-            <p className="text-[var(--muted-foreground)]">Nenhuma tarefa para este dia</p>
-            <Button onClick={() => router.push('/tasks')} className="mt-4">
-              Gerenciar tarefas
-            </Button>
-          </CardContent>
-        </Card>
-      ) : allCompleted ? (
-        <Card>
-          <CardContent className="py-8 text-center">
-            <div className="text-4xl mb-4">✅</div>
-            <p className="font-medium text-green-600">Todas as tarefas concluídas!</p>
-            <p className="text-sm text-[var(--muted-foreground)] mt-2">
-              {completedTasks} tarefa{completedTasks !== 1 ? 's' : ''} completada
-              {completedTasks !== 1 ? 's' : ''}
-            </p>
-          </CardContent>
-        </Card>
       ) : (
-        <div className="space-y-4">
-          {groups.map((group, index) => (
-            <Card key={group.employee?.id ?? `unassigned-${index}`}>
-              <CardHeader className="py-3">
-                <CardTitle className="flex items-center justify-between text-base">
-                  <span>
-                    {group.employee
-                      ? `${group.employee.name} (${ROLE_LABELS[group.employee.role]})`
-                      : 'Sem funcionário atribuído'}
-                  </span>
-                  <span className="text-sm font-normal text-[var(--muted-foreground)]">
-                    {group.tasks.filter((t) => t.occurrence?.completed).length}/{group.tasks.length}
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="space-y-2">
-                  {group.tasks.map((taskOcc) => (
-                    <label
-                      key={taskOcc.task.id}
-                      className="flex items-start gap-3 cursor-pointer py-2 hover:bg-[var(--secondary)] -mx-4 px-4 rounded transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={taskOcc.occurrence?.completed ?? false}
-                        onChange={() => toggleTask(taskOcc)}
-                        className="w-5 h-5 mt-0.5 rounded"
-                      />
+        <>
+          {/* Special Tasks Section */}
+          {totalSpecialTasks > 0 && (
+            <div className="space-y-2">
+              <h2 className="text-sm font-medium text-[var(--muted-foreground)]">
+                Tarefas Especiais ({totalSpecialTasks})
+              </h2>
+              {specialTasks.map((task) => (
+                <Card
+                  key={task.id}
+                  className="border-l-4 border-l-yellow-500 bg-yellow-50 dark:bg-yellow-950/20"
+                >
+                  <CardContent className="py-3">
+                    <div className="flex items-start gap-3">
+                      <span className="text-lg">⭐</span>
                       <div className="flex-1 min-w-0">
-                        <div
-                          className={`flex items-center gap-2 ${taskOcc.occurrence?.completed ? 'line-through text-[var(--muted-foreground)]' : ''}`}
-                        >
-                          <span>{CATEGORY_ICONS[taskOcc.task.category]}</span>
-                          <span>{taskOcc.task.title}</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{task.title}</span>
+                          <Badge variant="warning">Vence: {formatDueDate(task.dueDate)}</Badge>
                         </div>
-                        {taskOcc.task.description && (
+                        {task.description && (
                           <p className="text-sm text-[var(--muted-foreground)] mt-1">
-                            {taskOcc.task.description}
+                            {task.description}
                           </p>
                         )}
+                        <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                          {task.employee ? task.employee.name : 'Sem atribuição'}
+                        </p>
                       </div>
-                    </label>
-                  ))}
-                </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Regular Tasks Section */}
+          {totalTasks === 0 && totalSpecialTasks === 0 ? (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <div className="text-4xl mb-4">📋</div>
+                <p className="text-[var(--muted-foreground)]">Nenhuma tarefa para este dia</p>
+                <Button onClick={() => router.push('/tasks')} className="mt-4">
+                  Gerenciar tarefas
+                </Button>
               </CardContent>
             </Card>
-          ))}
-        </div>
+          ) : totalTasks > 0 ? (
+            <div className="space-y-4">
+              {groups.map((group, index) => (
+                <Card key={group.employee?.id ?? `unassigned-${index}`}>
+                  <CardHeader className="py-3">
+                    <CardTitle className="flex items-center justify-between text-base">
+                      <span>
+                        {group.employee
+                          ? `${group.employee.name} (${ROLE_LABELS[group.employee.role]})`
+                          : 'Sem funcionário atribuído'}
+                      </span>
+                      <span className="text-sm font-normal text-[var(--muted-foreground)]">
+                        {group.tasks.length} tarefa{group.tasks.length !== 1 ? 's' : ''}
+                      </span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <div className="space-y-2">
+                      {group.tasks.map((task) => (
+                        <div key={task.id} className="flex items-start gap-3 py-2 -mx-4 px-4">
+                          <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
+                          <div className="flex-1 min-w-0">
+                            <span>{task.title}</span>
+                            {task.description && (
+                              <p className="text-sm text-[var(--muted-foreground)] mt-1">
+                                {task.description}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : null}
+        </>
       )}
 
-      {totalTasks > 0 && !allCompleted && (
+      {(totalTasks > 0 || totalSpecialTasks > 0) && (
         <div className="text-center text-sm text-[var(--muted-foreground)]">
-          {completedTasks}/{totalTasks} tarefas concluídas
+          {totalTasks} tarefa{totalTasks !== 1 ? 's' : ''} regular
+          {totalTasks !== 1 ? 'es' : ''}
+          {totalSpecialTasks > 0 &&
+            ` • ${totalSpecialTasks} especial${totalSpecialTasks !== 1 ? 'is' : ''}`}
         </div>
       )}
     </div>

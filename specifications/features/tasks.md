@@ -2,7 +2,10 @@
 
 ## Visão Geral
 
-CRUD completo de tarefas com suporte a recorrência, categorias e atribuição a funcionários.
+CRUD de tarefas com suporte a recorrência, categorias e atribuição a funcionários.
+
+> **IMPORTANTE**: A recorrência (rrule) determina **apenas** em quais dias a tarefa aparece na lista impressa.
+> Este sistema não rastreia conclusão de tarefas - é apenas um gerador de listas para impressão térmica.
 
 ## User Stories
 

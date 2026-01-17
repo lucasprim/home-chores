@@ -1,11 +1,20 @@
 import cron, { type ScheduledTask } from 'node-cron'
 import { prisma } from './prisma'
 import { isTaskScheduledForDate } from './rrule-utils'
-import { printDailyTasks, printWeeklyMenu, PrinterType } from './printer'
+import { printMultiPageDaily, printWeeklyMenu, PrinterType, PrintPage } from './printer'
 import type { PrintJob, Employee } from '@prisma/client'
 
 type PrintJobWithEmployee = PrintJob & {
   employee: Pick<Employee, 'id' | 'name' | 'role' | 'workDays'> | null
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  FAXINEIRA: 'Faxineira',
+  COZINHEIRA: 'Cozinheira',
+  BABA: 'Babá',
+  JARDINEIRO: 'Jardineiro',
+  MOTORISTA: 'Motorista',
+  OUTRO: 'Outro',
 }
 
 // Map of job IDs to scheduled tasks
@@ -171,8 +180,52 @@ export async function executePrintJob(jobId: string): Promise<{
         return true
       })
 
-      if (scheduledTasks.length === 0) {
-        await createPrintLog(jobId, 'SKIPPED', 'Nenhuma tarefa para hoje')
+      // Get special tasks scheduled for today
+      const specialTasks = await prisma.specialTask.findMany({
+        where: {
+          active: true,
+          ...(job.employeeId && { employeeId: job.employeeId }),
+        },
+        include: {
+          employee: {
+            select: { id: true, name: true, role: true, workDays: true },
+          },
+        },
+      })
+
+      const scheduledSpecialTasks = specialTasks
+        .filter((task) => {
+          if (!isTaskScheduledForDate(task.rrule, today)) return false
+          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
+          return true
+        })
+        .map((task) => {
+          const dueDate = new Date(today)
+          dueDate.setDate(dueDate.getDate() + task.dueDays)
+          return {
+            ...task,
+            dueDate,
+          }
+        })
+
+      // Get meals for today
+      const todayStr = today.toISOString().split('T')[0]!
+      const meals = await prisma.mealSchedule.findMany({
+        where: {
+          date: {
+            gte: new Date(todayStr),
+            lt: new Date(new Date(todayStr).getTime() + 24 * 60 * 60 * 1000),
+          },
+        },
+        include: { dish: { select: { name: true } } },
+      })
+
+      const lunch = meals.find((m) => m.mealType === 'ALMOCO')?.dish.name
+      const dinner = meals.find((m) => m.mealType === 'JANTAR')?.dish.name
+
+      // Check if we have anything to print
+      if (scheduledTasks.length === 0 && scheduledSpecialTasks.length === 0 && !lunch && !dinner) {
+        await createPrintLog(jobId, 'SKIPPED', 'Nenhuma tarefa, cardápio ou tarefa especial para hoje')
         return {
           success: false,
           status: 'SKIPPED',
@@ -180,7 +233,11 @@ export async function executePrintJob(jobId: string): Promise<{
         }
       }
 
-      // Group by employee
+      // Build pages array
+      const pages: PrintPage[] = []
+
+      // Group tasks by employee
+      const unassignedTasks: { title: string; description: string | null }[] = []
       const employeeGroups: Record<
         string,
         {
@@ -191,29 +248,73 @@ export async function executePrintJob(jobId: string): Promise<{
       > = {}
 
       for (const task of scheduledTasks) {
-        const key = task.employee?.id ?? 'unassigned'
-        const employeeName = task.employee?.name ?? 'Sem atribuição'
-        const employeeRole = task.employee?.role ?? 'OUTRO'
-
-        if (!employeeGroups[key]) {
-          employeeGroups[key] = {
-            name: employeeName,
-            role: employeeRole,
-            tasks: [],
+        if (!task.employee) {
+          unassignedTasks.push({
+            title: task.title,
+            description: task.description,
+          })
+        } else {
+          const key = task.employee.id
+          if (!employeeGroups[key]) {
+            employeeGroups[key] = {
+              name: task.employee.name,
+              role: ROLE_LABELS[task.employee.role] || task.employee.role,
+              tasks: [],
+            }
           }
+          employeeGroups[key].tasks.push({
+            title: task.title,
+            description: task.description,
+          })
         }
-        employeeGroups[key].tasks.push({
-          title: task.title,
-          description: task.description,
+      }
+
+      // Page: Unassigned tasks (if any)
+      if (unassignedTasks.length > 0) {
+        pages.push({
+          type: 'UNASSIGNED_TASKS',
+          tasks: unassignedTasks,
         })
       }
 
-      await printDailyTasks({
+      // Pages: One per employee
+      for (const group of Object.values(employeeGroups)) {
+        pages.push({
+          type: 'EMPLOYEE_TASKS',
+          employee: { name: group.name, role: group.role },
+          tasks: group.tasks,
+        })
+      }
+
+      // Page: Menu (if meals exist)
+      if (lunch || dinner) {
+        pages.push({
+          type: 'MENU',
+          lunch,
+          dinner,
+        })
+      }
+
+      // Pages: One per special task
+      for (const task of scheduledSpecialTasks) {
+        pages.push({
+          type: 'SPECIAL_TASK',
+          task: {
+            title: task.title,
+            description: task.description,
+            dueDate: task.dueDate,
+            category: task.category,
+          },
+        })
+      }
+
+      // Print multi-page
+      await printMultiPageDaily({
         ip: printerIp,
         type: printerType,
         houseName,
         date: today,
-        employees: Object.values(employeeGroups),
+        pages,
       })
 
       await Promise.all([
@@ -227,7 +328,7 @@ export async function executePrintJob(jobId: string): Promise<{
       return {
         success: true,
         status: 'SUCCESS',
-        message: `Impresso com sucesso! ${scheduledTasks.length} tarefa(s)`,
+        message: `Impresso com sucesso! ${scheduledTasks.length} tarefa(s), ${scheduledSpecialTasks.length} especial(is)`,
       }
     }
 

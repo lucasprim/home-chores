@@ -7,10 +7,28 @@ interface Settings {
   house_name: string
   printer_ip: string
   printer_type: string
-  default_print_time: string
+  timezone: string
 }
 
 const PRINTER_TYPES = ['EPSON', 'STAR', 'TANCA', 'DARUMA']
+
+const TIMEZONES = [
+  { value: 'America/Sao_Paulo', label: 'São Paulo (GMT-3)' },
+  { value: 'America/Fortaleza', label: 'Fortaleza (GMT-3)' },
+  { value: 'America/Recife', label: 'Recife (GMT-3)' },
+  { value: 'America/Bahia', label: 'Bahia (GMT-3)' },
+  { value: 'America/Manaus', label: 'Manaus (GMT-4)' },
+  { value: 'America/Cuiaba', label: 'Cuiabá (GMT-4)' },
+  { value: 'America/Porto_Velho', label: 'Porto Velho (GMT-4)' },
+  { value: 'America/Boa_Vista', label: 'Boa Vista (GMT-4)' },
+  { value: 'America/Rio_Branco', label: 'Rio Branco (GMT-5)' },
+  { value: 'America/Belem', label: 'Belém (GMT-3)' },
+  { value: 'America/Maceio', label: 'Maceió (GMT-3)' },
+  { value: 'America/Araguaina', label: 'Araguaína (GMT-3)' },
+  { value: 'America/Campo_Grande', label: 'Campo Grande (GMT-4)' },
+  { value: 'America/Noronha', label: 'Fernando de Noronha (GMT-2)' },
+  { value: 'America/Santarem', label: 'Santarém (GMT-3)' },
+]
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null)
@@ -210,18 +228,24 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Impressão automática</CardTitle>
+          <CardTitle>Fuso Horário</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Horário padrão</label>
-            <Input
-              type="time"
-              value={settings.default_print_time}
-              onChange={(e) => updateSetting('default_print_time', e.target.value)}
-            />
+            <label className="block text-sm font-medium mb-1">Fuso horário</label>
+            <select
+              value={settings.timezone}
+              onChange={(e) => updateSetting('timezone', e.target.value)}
+              className="w-full h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
+            >
+              {TIMEZONES.map((tz) => (
+                <option key={tz.value} value={tz.value}>
+                  {tz.label}
+                </option>
+              ))}
+            </select>
             <p className="text-xs text-[var(--muted-foreground)] mt-1">
-              Este horário é usado como padrão ao criar novos jobs de impressão automática
+              Usado para calcular quais tarefas aparecem em cada dia (baseado na recorrência)
             </p>
           </div>
         </CardContent>
