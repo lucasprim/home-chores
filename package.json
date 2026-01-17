@@ -1,1 +1,20 @@
-{"devDependencies":{"typescript":"^5.9.3"}}
+{
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "node-thermal-printer": "^4.5.0",
+    "sharp": "^0.34.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "sharp",
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "print-tasks": "npx tsx scripts/print-maid-tasks.ts"
+  }
+}
