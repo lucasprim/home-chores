@@ -1,4 +1,5 @@
 import net from 'net'
+import iconv from 'iconv-lite'
 
 export type PrinterType = 'EPSON' | 'STAR' | 'TANCA' | 'DARUMA'
 
@@ -49,29 +50,9 @@ export async function testPrinterConnection(ip: string): Promise<boolean> {
   })
 }
 
-// Normalize Portuguese characters to ASCII for thermal printer compatibility
-function encodeForPrinter(text: string): string {
-  const replacements: Record<string, string> = {
-    'á': 'a', 'Á': 'A',
-    'à': 'a', 'À': 'A',
-    'â': 'a', 'Â': 'A',
-    'ã': 'a', 'Ã': 'A',
-    'é': 'e', 'É': 'E',
-    'ê': 'e', 'Ê': 'E',
-    'í': 'i', 'Í': 'I',
-    'ó': 'o', 'Ó': 'O',
-    'ô': 'o', 'Ô': 'O',
-    'õ': 'o', 'Õ': 'O',
-    'ú': 'u', 'Ú': 'U',
-    'ü': 'u', 'Ü': 'U',
-    'ç': 'c', 'Ç': 'C',
-  }
-
-  let result = text
-  for (const [char, replacement] of Object.entries(replacements)) {
-    result = result.split(char).join(replacement)
-  }
-  return result
+// Encode UTF-8 text to CP860 (Portuguese code page) for thermal printer
+function encodeForPrinter(text: string): Buffer {
+  return iconv.encode(text, 'CP860')
 }
 
 async function sendToPrinter(ip: string, data: string): Promise<void> {
@@ -80,9 +61,9 @@ async function sendToPrinter(ip: string, data: string): Promise<void> {
     socket.setTimeout(10000)
 
     socket.on('connect', () => {
-      // Encode text for printer
+      // Encode text to CP860 for Portuguese character support
       const encodedData = encodeForPrinter(data)
-      socket.write(encodedData, 'binary', (err) => {
+      socket.write(encodedData, (err) => {
         socket.destroy()
         if (err) reject(err)
         else resolve()
