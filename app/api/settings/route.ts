@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS = {
   printer_ip: '192.168.1.230',
   printer_type: 'EPSON',
   timezone: 'America/Sao_Paulo',
+  print_notes_section: 'false',
 }
 
 type SettingsKey = keyof typeof DEFAULT_SETTINGS
@@ -30,7 +31,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json()
-    const allowedKeys: SettingsKey[] = ['house_name', 'printer_ip', 'printer_type', 'timezone']
+    const allowedKeys: SettingsKey[] = ['house_name', 'printer_ip', 'printer_type', 'timezone', 'print_notes_section']
 
     const updates: { key: string; value: string }[] = []
 
@@ -71,6 +72,10 @@ export async function PUT(request: NextRequest) {
 
         if (key === 'timezone' && !validTimezones.includes(value)) {
           return NextResponse.json({ error: 'Fuso horário inválido' }, { status: 400 })
+        }
+
+        if (key === 'print_notes_section' && !['true', 'false'].includes(value)) {
+          return NextResponse.json({ error: 'Valor inválido para seção de notas' }, { status: 400 })
         }
 
         updates.push({ key, value })

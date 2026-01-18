@@ -8,6 +8,7 @@ interface Settings {
   printer_ip: string
   printer_type: string
   timezone: string
+  print_notes_section: string
 }
 
 const PRINTER_TYPES = ['EPSON', 'STAR', 'TANCA', 'DARUMA']
@@ -207,6 +208,21 @@ export default function SettingsPage() {
           <Button variant="secondary" onClick={handleTestPrinter} disabled={printerStatus === 'testing'}>
             {printerStatus === 'testing' ? 'Testando...' : 'Testar e imprimir página de teste'}
           </Button>
+
+          <div className="pt-4 border-t border-[var(--border)]">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.print_notes_section === 'true'}
+                onChange={(e) => updateSetting('print_notes_section', e.target.checked ? 'true' : 'false')}
+                className="w-5 h-5 rounded border-[var(--border)] accent-[var(--primary)]"
+              />
+              <span className="text-sm font-medium">Imprimir seção de notas</span>
+            </label>
+            <p className="text-xs text-[var(--muted-foreground)] mt-1 ml-8">
+              Adiciona um espaço para anotações no final da lista de tarefas de cada funcionário
+            </p>
+          </div>
         </CardContent>
       </Card>
 

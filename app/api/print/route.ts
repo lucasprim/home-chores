@@ -40,10 +40,12 @@ export async function POST(request: NextRequest) {
     const ipRecord = await prisma.settings.findUnique({ where: { key: 'printer_ip' } })
     const typeRecord = await prisma.settings.findUnique({ where: { key: 'printer_type' } })
     const houseRecord = await prisma.settings.findUnique({ where: { key: 'house_name' } })
+    const notesRecord = await prisma.settings.findUnique({ where: { key: 'print_notes_section' } })
 
     const printerIp = ipRecord?.value ?? '192.168.1.230'
     const printerType = (typeRecord?.value ?? 'EPSON') as PrinterType
     const houseName = houseRecord?.value ?? 'Minha Casa'
+    const showNotesSection = notesRecord?.value === 'true'
 
     if (type === 'DAILY_TASKS') {
       const dayOfWeek = date.getDay()
@@ -216,6 +218,7 @@ export async function POST(request: NextRequest) {
         houseName,
         date,
         pages,
+        showNotesSection,
       })
 
       return NextResponse.json({ success: true, message: 'Impresso com sucesso!' })

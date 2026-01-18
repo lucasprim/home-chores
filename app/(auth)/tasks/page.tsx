@@ -98,6 +98,7 @@ export default function TasksPage() {
   const [editingSpecialTask, setEditingSpecialTask] = useState<SpecialTask | null>(null)
   const [showInactive, setShowInactive] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState<Category | ''>('')
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<Category>>(new Set())
   const [employeeFilter, setEmployeeFilter] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -381,12 +382,28 @@ export default function TasksPage() {
             <div className="space-y-4">
               {groupedTasks.map(({ category, tasks: categoryTasks }) => {
                 const colors = CATEGORY_COLORS[category]
+                const isCollapsed = collapsedCategories.has(category)
                 return (
                   <Card key={category} className={`overflow-hidden border-l-4 ${colors.border}`}>
-                    {/* Category Header */}
-                    <div className={`px-4 py-2.5 ${colors.bg} border-b border-[var(--border)]`}>
+                    {/* Category Header - Clickable */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCollapsedCategories(prev => {
+                          const next = new Set(prev)
+                          if (next.has(category)) {
+                            next.delete(category)
+                          } else {
+                            next.add(category)
+                          }
+                          return next
+                        })
+                      }}
+                      className={`w-full px-4 py-2.5 ${colors.bg} ${!isCollapsed ? 'border-b border-[var(--border)]' : ''} hover:opacity-80 transition-opacity`}
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
+                          <span className={`text-sm transition-transform ${isCollapsed ? '' : 'rotate-90'}`}>▶</span>
                           <span className="text-lg">{CATEGORY_ICONS[category]}</span>
                           <span className={`font-semibold ${colors.text}`}>
                             {CATEGORY_LABELS[category]}
@@ -396,34 +413,36 @@ export default function TasksPage() {
                           ({categoryTasks.length})
                         </span>
                       </div>
-                    </div>
-                    {/* Tasks List */}
-                    <div className="divide-y divide-[var(--border)]">
-                      {categoryTasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className={`
-                            flex items-center gap-2 px-4 py-2.5
-                            hover:bg-[var(--secondary)] transition-colors
-                            ${!task.active ? 'opacity-50' : ''}
-                          `}
-                        >
-                          <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                            <span className="font-medium truncate">{task.title}</span>
-                            <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
-                              · {task.employee?.name || 'Sem atrib.'} · {rruleToReadable(task.rrule)}
-                            </span>
-                            {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+                    </button>
+                    {/* Tasks List - Collapsible */}
+                    {!isCollapsed && (
+                      <div className="divide-y divide-[var(--border)]">
+                        {categoryTasks.map((task) => (
+                          <div
+                            key={task.id}
+                            className={`
+                              flex items-center gap-2 px-4 py-2.5
+                              hover:bg-[var(--secondary)] transition-colors
+                              ${!task.active ? 'opacity-50' : ''}
+                            `}
+                          >
+                            <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                              <span className="font-medium truncate">{task.title}</span>
+                              <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
+                                · {task.employee?.name || 'Sem atrib.'} · {rruleToReadable(task.rrule)}
+                              </span>
+                              {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+                            </div>
+                            <DropdownMenu
+                              items={[
+                                { label: 'Editar', onClick: () => handleEditTask(task) },
+                                { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleActive(task) },
+                              ]}
+                            />
                           </div>
-                          <DropdownMenu
-                            items={[
-                              { label: 'Editar', onClick: () => handleEditTask(task) },
-                              { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleActive(task) },
-                            ]}
-                          />
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </Card>
                 )
               })}
@@ -458,12 +477,28 @@ export default function TasksPage() {
             <div className="space-y-4">
               {groupedSpecialTasks.map(({ category, tasks: categoryTasks }) => {
                 const colors = CATEGORY_COLORS[category]
+                const isCollapsed = collapsedCategories.has(category)
                 return (
                   <Card key={category} className={`overflow-hidden border-l-4 ${colors.border}`}>
-                    {/* Category Header */}
-                    <div className={`px-4 py-2.5 ${colors.bg} border-b border-[var(--border)]`}>
+                    {/* Category Header - Clickable */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCollapsedCategories(prev => {
+                          const next = new Set(prev)
+                          if (next.has(category)) {
+                            next.delete(category)
+                          } else {
+                            next.add(category)
+                          }
+                          return next
+                        })
+                      }}
+                      className={`w-full px-4 py-2.5 ${colors.bg} ${!isCollapsed ? 'border-b border-[var(--border)]' : ''} hover:opacity-80 transition-opacity`}
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
+                          <span className={`text-sm transition-transform ${isCollapsed ? '' : 'rotate-90'}`}>▶</span>
                           <span className="text-lg">{CATEGORY_ICONS[category]}</span>
                           <span className={`font-semibold ${colors.text}`}>
                             {CATEGORY_LABELS[category]}
@@ -473,35 +508,37 @@ export default function TasksPage() {
                           ({categoryTasks.length})
                         </span>
                       </div>
-                    </div>
-                    {/* Tasks List */}
-                    <div className="divide-y divide-[var(--border)]">
-                      {categoryTasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className={`
-                            flex items-center gap-2 px-4 py-2.5
-                            hover:bg-[var(--secondary)] transition-colors
-                            ${!task.active ? 'opacity-50' : ''}
-                          `}
-                        >
-                          <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                            <span className="font-medium truncate">{task.title}</span>
-                            <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
-                              · {task.employee?.name || 'Sem atrib.'} · {task.dueDays}d
-                            </span>
-                            {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+                    </button>
+                    {/* Tasks List - Collapsible */}
+                    {!isCollapsed && (
+                      <div className="divide-y divide-[var(--border)]">
+                        {categoryTasks.map((task) => (
+                          <div
+                            key={task.id}
+                            className={`
+                              flex items-center gap-2 px-4 py-2.5
+                              hover:bg-[var(--secondary)] transition-colors
+                              ${!task.active ? 'opacity-50' : ''}
+                            `}
+                          >
+                            <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                              <span className="font-medium truncate">{task.title}</span>
+                              <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
+                                · {task.employee?.name || 'Sem atrib.'} · {task.dueDays}d
+                              </span>
+                              {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+                            </div>
+                            <DropdownMenu
+                              items={[
+                                { label: 'Editar', onClick: () => handleEditSpecialTask(task) },
+                                { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleSpecialTaskActive(task) },
+                                { label: 'Excluir', onClick: () => handleDeleteSpecialTask(task), variant: 'destructive' },
+                              ]}
+                            />
                           </div>
-                          <DropdownMenu
-                            items={[
-                              { label: 'Editar', onClick: () => handleEditSpecialTask(task) },
-                              { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleSpecialTaskActive(task) },
-                              { label: 'Excluir', onClick: () => handleDeleteSpecialTask(task), variant: 'destructive' },
-                            ]}
-                          />
-                        </div>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
                   </Card>
                 )
               })}

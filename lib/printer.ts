@@ -284,13 +284,15 @@ export interface PrintMultiPageOptions {
   houseName: string
   date: Date
   pages: PrintPage[]
+  showNotesSection?: boolean
 }
 
 function formatTasksPage(
   tasks: TaskItem[],
   header: string,
   houseName: string,
-  date: Date
+  date: Date,
+  showNotesSection?: boolean
 ): string[] {
   const dateStr = date.toLocaleDateString('pt-BR', {
     weekday: 'long',
@@ -328,6 +330,23 @@ function formatTasksPage(
   lines.push('\n')
   lines.push(COMMANDS.ALIGN_CENTER)
   lines.push(`${tasks.length} tarefa${tasks.length !== 1 ? 's' : ''}\n`)
+
+  if (showNotesSection) {
+    lines.push(`${COMMANDS.DASH_LINE}\n`)
+    lines.push(COMMANDS.BOLD_ON)
+    lines.push('NOTAS / OBSERVACOES:\n')
+    lines.push(COMMANDS.BOLD_OFF)
+    lines.push(COMMANDS.ALIGN_LEFT)
+    lines.push('\n')
+    lines.push('________________________________\n')
+    lines.push('\n')
+    lines.push('________________________________\n')
+    lines.push('\n')
+    lines.push('________________________________\n')
+    lines.push('\n')
+    lines.push(COMMANDS.ALIGN_CENTER)
+  }
+
   lines.push(`${COMMANDS.LINE}\n`)
   lines.push('\n\n\n')
 
@@ -456,7 +475,7 @@ function formatSpecialTaskPage(
 }
 
 export async function printMultiPageDaily(options: PrintMultiPageOptions): Promise<void> {
-  const { ip, houseName, date, pages } = options
+  const { ip, houseName, date, pages, showNotesSection } = options
 
   const allLines: string[] = []
   const totalPages = pages.length
@@ -476,7 +495,8 @@ export async function printMultiPageDaily(options: PrintMultiPageOptions): Promi
             page.tasks,
             page.employee.name.toUpperCase(),
             houseName,
-            date
+            date,
+            showNotesSection
           )
         )
         break
