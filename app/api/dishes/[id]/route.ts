@@ -25,7 +25,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, description, category, prepTime, servings, ingredients, active } = body
+    const { name, categories, active } = body
 
     const existing = await prisma.dish.findUnique({ where: { id } })
     if (!existing) {
@@ -41,19 +41,27 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    if (category !== undefined && !Object.values(DishCategory).includes(category)) {
-      return NextResponse.json({ error: 'Categoria inválida' }, { status: 400 })
+    if (categories !== undefined) {
+      if (!Array.isArray(categories) || categories.length === 0) {
+        return NextResponse.json({ error: 'Selecione pelo menos uma categoria' }, { status: 400 })
+      }
+      const validCategories = categories.filter((c: string) =>
+        Object.values(DishCategory).includes(c as DishCategory)
+      )
+      if (validCategories.length === 0) {
+        return NextResponse.json({ error: 'Categoria inválida' }, { status: 400 })
+      }
     }
 
     const dish = await prisma.dish.update({
       where: { id },
       data: {
         ...(name !== undefined && { name: name.trim() }),
-        ...(description !== undefined && { description: description?.trim() || null }),
-        ...(category !== undefined && { category }),
-        ...(prepTime !== undefined && { prepTime: prepTime ? parseInt(prepTime) : null }),
-        ...(servings !== undefined && { servings: servings ? parseInt(servings) : null }),
-        ...(ingredients !== undefined && { ingredients: Array.isArray(ingredients) ? ingredients : [] }),
+        ...(categories !== undefined && {
+          categories: categories.filter((c: string) =>
+            Object.values(DishCategory).includes(c as DishCategory)
+          ),
+        }),
         ...(active !== undefined && { active }),
       },
     })

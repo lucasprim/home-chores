@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { MealType } from '@prisma/client'
 
+// Parse date string as local date (not UTC)
+// "2026-01-31" -> new Date(2026, 0, 31) which is local midnight
+function parseLocalDate(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  return new Date(year!, month! - 1, day!)
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
@@ -26,8 +33,8 @@ export async function GET(request: NextRequest) {
     } else if (startDate && endDate) {
       whereDate = {
         date: {
-          gte: new Date(startDate),
-          lte: new Date(endDate),
+          gte: parseLocalDate(startDate),
+          lte: parseLocalDate(endDate),
         },
       }
     }
@@ -36,10 +43,7 @@ export async function GET(request: NextRequest) {
       where: whereDate,
       include: {
         dish: {
-          select: { id: true, name: true, category: true },
-        },
-        employee: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, categories: true },
         },
       },
       orderBy: [{ date: 'asc' }, { mealType: 'asc' }],
@@ -54,7 +58,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { date, mealType, dishId, employeeId, notes } = body
+    const { date, mealType, dishId, notes } = body
 
     if (!date || !mealType || !dishId) {
       return NextResponse.json({ error: 'date, mealType e dishId são obrigatórios' }, { status: 400 })
@@ -69,14 +73,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Prato não encontrado' }, { status: 400 })
     }
 
-    if (employeeId) {
-      const employee = await prisma.employee.findUnique({ where: { id: employeeId } })
-      if (!employee) {
-        return NextResponse.json({ error: 'Funcionário não encontrado' }, { status: 400 })
-      }
-    }
-
-    const dateObj = new Date(date)
+    const dateObj = parseLocalDate(date)
     dateObj.setHours(0, 0, 0, 0)
 
     // Upsert to handle existing schedule
@@ -89,22 +86,17 @@ export async function POST(request: NextRequest) {
       },
       update: {
         dishId,
-        employeeId: employeeId || null,
         notes: notes || null,
       },
       create: {
         date: dateObj,
         mealType,
         dishId,
-        employeeId: employeeId || null,
         notes: notes || null,
       },
       include: {
         dish: {
-          select: { id: true, name: true, category: true },
-        },
-        employee: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, categories: true },
         },
       },
     })
@@ -125,7 +117,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'date e mealType são obrigatórios' }, { status: 400 })
     }
 
-    const dateObj = new Date(date)
+    const dateObj = parseLocalDate(date)
     dateObj.setHours(0, 0, 0, 0)
 
     await prisma.mealSchedule.delete({

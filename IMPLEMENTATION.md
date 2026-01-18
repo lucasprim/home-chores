@@ -59,6 +59,24 @@
 
 ## Completed Work
 
+### 2026-01-17: Simplify Dish Model - Multi-Category Support
+- **Simplified Dish model**: Now only has `name` and `categories` fields
+- **Multi-category support**: A dish can now be served at multiple meals (e.g., both lunch AND dinner)
+- **Removed fields**: description, prepTime, servings, ingredients
+- **UI changes**:
+  - Dish form now only shows name input and category toggle buttons
+  - Categories are displayed as badges on dish cards
+  - DayEditForm filters dishes by checking if they have the appropriate category
+- **Files changed**:
+  - `prisma/schema.prisma` - Changed Dish.category (single) to Dish.categories (array)
+  - `app/api/dishes/route.ts` - Updated for multi-category
+  - `app/api/dishes/[id]/route.ts` - Updated for multi-category
+  - `app/api/meal-schedule/randomize/route.ts` - Groups dishes by all their categories
+  - `app/(auth)/menu/page.tsx` - Simplified DishForm, updated displays
+  - `prisma/seed.ts` - Updated example dish
+  - `specifications/data-model.md` - Updated documentation
+  - `specifications/features/home-menu.md` - Updated wireframes and interfaces
+
 ### 2026-01-17: Fundamental Redesign - Print List Generator (not Task Tracker)
 - **Major Refactoring**: System redesigned to be a print list generator, NOT a task tracker
 - **Key Concept**: Recurrence (rrule) only determines which day a task appears in the print list

@@ -10,18 +10,18 @@ export async function GET(request: NextRequest) {
 
     const where: {
       active?: boolean
-      category?: DishCategory
+      categories?: { has: DishCategory }
     } = {}
 
     if (active === 'true') where.active = true
     if (active === 'false') where.active = false
     if (category && Object.values(DishCategory).includes(category as DishCategory)) {
-      where.category = category as DishCategory
+      where.categories = { has: category as DishCategory }
     }
 
     const dishes = await prisma.dish.findMany({
       where,
-      orderBy: [{ category: 'asc' }, { name: 'asc' }],
+      orderBy: [{ name: 'asc' }],
     })
 
     return NextResponse.json(dishes)
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, description, category, prepTime, servings, ingredients } = body
+    const { name, categories } = body
 
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
       return NextResponse.json({ error: 'Nome deve ter pelo menos 2 caracteres' }, { status: 400 })
@@ -43,18 +43,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Nome deve ter no máximo 100 caracteres' }, { status: 400 })
     }
 
-    if (!category || !Object.values(DishCategory).includes(category)) {
+    if (!Array.isArray(categories) || categories.length === 0) {
+      return NextResponse.json({ error: 'Selecione pelo menos uma categoria' }, { status: 400 })
+    }
+
+    const validCategories = categories.filter((c: string) =>
+      Object.values(DishCategory).includes(c as DishCategory)
+    )
+
+    if (validCategories.length === 0) {
       return NextResponse.json({ error: 'Categoria inválida' }, { status: 400 })
     }
 
     const dish = await prisma.dish.create({
       data: {
         name: name.trim(),
-        description: description?.trim() || null,
-        category,
-        prepTime: prepTime ? parseInt(prepTime) : null,
-        servings: servings ? parseInt(servings) : null,
-        ingredients: Array.isArray(ingredients) ? ingredients : [],
+        categories: validCategories,
       },
     })
 

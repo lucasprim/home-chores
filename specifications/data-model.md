@@ -38,15 +38,11 @@
 ├─────────────────┤       ├─────────────────┤
 │ id              │◀──────│ id              │
 │ name            │       │ date            │
-│ description     │       │ mealType        │
-│ category        │       │ dishId          │
-│ prepTime        │       │ employeeId      │◀─── Employee
-│ servings        │       │ notes           │
-│ ingredients     │       │ createdAt       │
-│ active          │       └─────────────────┘
-│ createdAt       │
-│ updatedAt       │
-└─────────────────┘
+│ categories[]    │       │ mealType        │
+│ active          │       │ dishId          │
+│ createdAt       │       │ notes           │
+│ updatedAt       │       │ createdAt       │
+└─────────────────┘       └─────────────────┘
 
 ┌─────────────────┐       ┌─────────────────┐
 │    Settings     │       │    PrintJob     │
@@ -100,9 +96,9 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tasks         Task[]
-  mealSchedules MealSchedule[]
-  printJobs     PrintJob[]
+  tasks        Task[]
+  specialTasks SpecialTask[]
+  printJobs    PrintJob[]
 
   @@map("employees")
 }
@@ -183,16 +179,12 @@ enum Category {
 // ============================================
 
 model Dish {
-  id          String       @id @default(cuid())
-  name        String
-  description String?
-  category    DishCategory
-  prepTime    Int?         // Tempo de preparo em minutos
-  servings    Int?         // Número de porções
-  ingredients String[]     // Lista de ingredientes
-  active      Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id         String         @id @default(cuid())
+  name       String
+  categories DishCategory[] // Pode ser servido em múltiplas refeições (ex: almoço E jantar)
+  active     Boolean        @default(true)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
 
   mealSchedules MealSchedule[]
 
@@ -211,16 +203,14 @@ enum DishCategory {
 }
 
 model MealSchedule {
-  id         String   @id @default(cuid())
-  date       DateTime @db.Date
-  mealType   MealType
-  dishId     String
-  employeeId String?  // Quem vai preparar
-  notes      String?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  mealType  MealType
+  dishId    String
+  notes     String?
+  createdAt DateTime @default(now())
 
-  dish     Dish      @relation(fields: [dishId], references: [id])
-  employee Employee? @relation(fields: [employeeId], references: [id])
+  dish Dish @relation(fields: [dishId], references: [id])
 
   @@unique([date, mealType])
   @@index([date])
@@ -231,6 +221,9 @@ enum MealType {
   CAFE_MANHA
   ALMOCO
   JANTAR
+  LANCHE
+  SOBREMESA
+  BEBIDA
 
   @@map("meal_type")
 }
@@ -371,15 +364,13 @@ enum PrintStatus {
 |-------|------|-----------|
 | id | string | ID único (CUID) |
 | name | string | Nome do prato |
-| description | string? | Descrição/receita |
-| category | DishCategory | Tipo de refeição |
-| prepTime | int? | Tempo de preparo (minutos) |
-| servings | int? | Número de porções |
-| ingredients | string[] | Lista de ingredientes |
+| categories | DishCategory[] | Tipos de refeição (pode ter múltiplas) |
 | active | boolean | Se está ativo |
 
 **Regras:**
 - Nome é obrigatório
+- Pelo menos uma categoria é obrigatória
+- Um prato pode pertencer a múltiplas categorias (ex: almoço E jantar)
 - Prato inativo não aparece no planejamento
 
 ### MealSchedule (Cardápio)
@@ -388,14 +379,12 @@ enum PrintStatus {
 |-------|------|-----------|
 | id | string | ID único (CUID) |
 | date | date | Data da refeição |
-| mealType | MealType | Tipo (CAFE_MANHA, ALMOCO, JANTAR) |
+| mealType | MealType | Tipo (CAFE_MANHA, ALMOCO, JANTAR, LANCHE, SOBREMESA, BEBIDA) |
 | dishId | string | ID do prato |
-| employeeId | string? | Quem vai preparar |
 | notes | string? | Observações |
 
 **Regras:**
 - Combinação date + mealType é única
-- employeeId é opcional (qualquer um pode preparar)
 
 ### Settings (Configurações)
 
@@ -510,10 +499,7 @@ async function main() {
   await prisma.dish.create({
     data: {
       name: 'Arroz com feijão',
-      category: DishCategory.ALMOCO,
-      prepTime: 60,
-      servings: 4,
-      ingredients: ['Arroz', 'Feijão', 'Alho', 'Sal', 'Óleo'],
+      categories: [DishCategory.ALMOCO, DishCategory.JANTAR],
     },
   })
 }

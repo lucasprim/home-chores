@@ -44,10 +44,7 @@ async function main() {
   await prisma.dish.create({
     data: {
       name: 'Arroz com feijão',
-      category: DishCategory.ALMOCO,
-      prepTime: 60,
-      servings: 4,
-      ingredients: ['Arroz', 'Feijão', 'Alho', 'Sal', 'Óleo'],
+      categories: [DishCategory.ALMOCO, DishCategory.JANTAR],
     },
   })
   console.log('Dish created')

@@ -11,8 +11,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'startDate e endDate são obrigatórios' }, { status: 400 })
     }
 
-    const start = new Date(startDate)
-    const end = new Date(endDate)
+    // Parse date strings as local dates (not UTC)
+    // "2026-01-31" -> new Date(2026, 0, 31) which is local midnight
+    const parseLocalDate = (dateStr: string): Date => {
+      const [year, month, day] = dateStr.split('-').map(Number)
+      return new Date(year!, month! - 1, day!)
+    }
+
+    const start = parseLocalDate(startDate)
+    const end = parseLocalDate(endDate)
 
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
       return NextResponse.json({ error: 'Datas inválidas' }, { status: 400 })
@@ -20,24 +27,30 @@ export async function POST(request: NextRequest) {
 
     const typesToRandomize: MealType[] = mealTypes || ['ALMOCO', 'JANTAR']
 
-    // Map meal types to dish categories
+    // Map meal types to dish categories (they match 1:1)
     const mealToCategory: Record<MealType, DishCategory> = {
       CAFE_MANHA: 'CAFE_MANHA',
       ALMOCO: 'ALMOCO',
       JANTAR: 'JANTAR',
+      LANCHE: 'LANCHE',
+      SOBREMESA: 'SOBREMESA',
+      BEBIDA: 'BEBIDA',
     }
 
-    // Get active dishes by category
+    // Get active dishes
     const dishes = await prisma.dish.findMany({
       where: { active: true },
     })
 
+    // Group dishes by category (a dish can appear in multiple categories)
     const dishesByCategory: Record<string, typeof dishes> = {}
     for (const dish of dishes) {
-      if (!dishesByCategory[dish.category]) {
-        dishesByCategory[dish.category] = []
+      for (const category of dish.categories) {
+        if (!dishesByCategory[category]) {
+          dishesByCategory[category] = []
+        }
+        dishesByCategory[category]!.push(dish)
       }
-      dishesByCategory[dish.category]!.push(dish)
     }
 
     let created = 0

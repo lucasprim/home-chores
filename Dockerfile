@@ -27,6 +27,9 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
+# Install libcap for setcap (allows binding to port 80 as non-root)
+RUN apk add --no-cache libcap
+
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
@@ -38,21 +41,31 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
+# Allow node to bind to privileged ports (80) as non-root
+RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/node
+
 # Copy necessary files from builder
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.pnpm/@prisma+client* ./node_modules/.pnpm/
+COPY --from=builder /app/node_modules/.pnpm/prisma* ./node_modules/.pnpm/
+COPY --from=builder /app/node_modules/prisma ./node_modules/prisma
+COPY --from=builder /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 
 # Set permissions
 RUN chown -R nextjs:nodejs /app
 
 USER nextjs
 
-EXPOSE 3000
+EXPOSE 80
 
-ENV PORT=3000
+ENV PORT=80
 ENV HOSTNAME="0.0.0.0"
 
-CMD ["node", "server.js"]
+ENTRYPOINT ["./docker-entrypoint.sh"]

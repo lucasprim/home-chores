@@ -2,17 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button, Card, CardHeader, CardTitle, CardContent, Modal, Input, Badge } from '@/components/ui'
-import { DishCategory, MealType, Role } from '@prisma/client'
+import { Button, Card, CardContent, Modal, Input, Badge } from '@/components/ui'
+import { DishCategory, MealType } from '@prisma/client'
 
 interface Dish {
   id: string
   name: string
-  description: string | null
-  category: DishCategory
-  prepTime: number | null
-  servings: number | null
-  ingredients: string[]
+  categories: DishCategory[]
   active: boolean
 }
 
@@ -20,15 +16,29 @@ interface MealSchedule {
   id: string
   date: string
   mealType: MealType
-  dish: { id: string; name: string; category: DishCategory }
-  employee: { id: string; name: string } | null
+  dish: { id: string; name: string; categories: DishCategory[] }
   notes: string | null
 }
 
-interface Employee {
-  id: string
-  name: string
-  role: Role
+// All meal types in display order
+const MEAL_TYPES: MealType[] = ['CAFE_MANHA', 'ALMOCO', 'JANTAR', 'LANCHE', 'SOBREMESA', 'BEBIDA']
+
+const MEAL_TYPE_LABELS: Record<MealType, string> = {
+  CAFE_MANHA: 'Café da manhã',
+  ALMOCO: 'Almoço',
+  JANTAR: 'Jantar',
+  LANCHE: 'Lanche',
+  SOBREMESA: 'Sobremesa',
+  BEBIDA: 'Bebida',
+}
+
+const MEAL_TYPE_ICONS: Record<MealType, string> = {
+  CAFE_MANHA: '☕',
+  ALMOCO: '🍚',
+  JANTAR: '🍲',
+  LANCHE: '🥪',
+  SOBREMESA: '🍰',
+  BEBIDA: '🥤',
 }
 
 const DISH_CATEGORY_LABELS: Record<DishCategory, string> = {
@@ -49,12 +59,6 @@ const DISH_CATEGORY_ICONS: Record<DishCategory, string> = {
   BEBIDA: '🥤',
 }
 
-const MEAL_TYPE_LABELS: Record<MealType, string> = {
-  CAFE_MANHA: 'Café',
-  ALMOCO: 'Almoço',
-  JANTAR: 'Jantar',
-}
-
 type TabType = 'calendar' | 'dishes'
 
 export default function MenuPage() {
@@ -67,7 +71,6 @@ export default function MenuPage() {
 
   const [schedules, setSchedules] = useState<MealSchedule[]>([])
   const [dishes, setDishes] = useState<Dish[]>([])
-  const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -105,26 +108,14 @@ export default function MenuPage() {
     }
   }, [])
 
-  const fetchEmployees = useCallback(async () => {
-    try {
-      const res = await fetch('/api/employees')
-      if (res.ok) {
-        const data = await res.json()
-        setEmployees(data.filter((e: Employee & { active: boolean }) => e.active))
-      }
-    } catch {
-      // Ignore
-    }
-  }, [])
-
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchSchedules(), fetchDishes(), fetchEmployees()])
+      await Promise.all([fetchSchedules(), fetchDishes()])
       setLoading(false)
     }
     load()
-  }, [fetchSchedules, fetchDishes, fetchEmployees])
+  }, [fetchSchedules, fetchDishes])
 
   const handleRandomize = async () => {
     try {
@@ -134,12 +125,16 @@ export default function MenuPage() {
       const startDate = new Date(currentMonth)
       const endDate = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0)
 
+      // Format dates as YYYY-MM-DD without timezone conversion
+      const formatDate = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
       const res = await fetch('/api/meal-schedule/randomize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          startDate: startDate.toISOString().split('T')[0],
-          endDate: endDate.toISOString().split('T')[0],
+          startDate: formatDate(startDate),
+          endDate: formatDate(endDate),
           mealTypes: ['ALMOCO', 'JANTAR'],
           overwrite: false,
         }),
@@ -183,7 +178,8 @@ export default function MenuPage() {
   const monthName = currentMonth.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
 
   const getScheduleForDay = (date: Date) => {
-    const dateStr = date.toISOString().split('T')[0]
+    // Format date as YYYY-MM-DD without timezone conversion
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
     return schedules.filter((s) => s.date.split('T')[0] === dateStr)
   }
 
@@ -263,16 +259,14 @@ export default function MenuPage() {
                   const daySchedules = date ? getScheduleForDay(date) : []
                   const isToday =
                     date && date.toDateString() === new Date().toDateString()
-                  const lunch = daySchedules.find((s) => s.mealType === 'ALMOCO')
-                  const dinner = daySchedules.find((s) => s.mealType === 'JANTAR')
 
                   return (
                     <div
                       key={index}
                       className={`
-                        min-h-16 p-1 rounded-lg text-sm
+                        min-h-24 p-1 rounded-lg text-sm
                         ${date ? 'cursor-pointer hover:bg-[var(--secondary)]' : ''}
-                        ${isToday ? 'bg-[var(--primary)] bg-opacity-10 border border-[var(--primary)]' : ''}
+                        ${isToday ? 'bg-blue-100 dark:bg-blue-900/30 border-2 border-[var(--primary)]' : ''}
                       `}
                       onClick={() => date && handleDayClick(date)}
                     >
@@ -281,8 +275,15 @@ export default function MenuPage() {
                           <div className={`font-medium ${isToday ? 'text-[var(--primary)]' : ''}`}>
                             {date.getDate()}
                           </div>
-                          <div className="text-xs truncate">{lunch && '🍚'}</div>
-                          <div className="text-xs truncate">{dinner && '🍲'}</div>
+                          {MEAL_TYPES.map((mealType) => {
+                            const schedule = daySchedules.find((s) => s.mealType === mealType)
+                            if (!schedule) return null
+                            return (
+                              <div key={mealType} className="text-xs truncate" title={schedule.dish.name}>
+                                {MEAL_TYPE_ICONS[mealType]} {schedule.dish.name}
+                              </div>
+                            )
+                          })}
                         </>
                       )}
                     </div>
@@ -293,7 +294,13 @@ export default function MenuPage() {
           </Card>
 
           <div className="text-sm text-[var(--muted-foreground)]">
-            🍚 Almoço • 🍲 Jantar • Clique em um dia para editar
+            {MEAL_TYPES.map((mt, i) => (
+              <span key={mt}>
+                {MEAL_TYPE_ICONS[mt]} {MEAL_TYPE_LABELS[mt]}
+                {i < MEAL_TYPES.length - 1 ? ' • ' : ''}
+              </span>
+            ))}
+            <span className="block mt-1">Clique em um dia para editar</span>
           </div>
         </>
       ) : (
@@ -328,21 +335,15 @@ export default function MenuPage() {
                 <Card key={dish.id} className={!dish.active ? 'opacity-60' : ''}>
                   <CardContent className="flex items-center justify-between py-3">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{DISH_CATEGORY_ICONS[dish.category]}</span>
-                        <span className="font-medium truncate">{dish.name}</span>
-                        <Badge variant={dish.active ? 'outline' : 'warning'}>
-                          {DISH_CATEGORY_LABELS[dish.category]}
-                        </Badge>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium">{dish.name}</span>
+                        {dish.categories.map((cat) => (
+                          <Badge key={cat} variant="outline">
+                            {DISH_CATEGORY_ICONS[cat]} {DISH_CATEGORY_LABELS[cat]}
+                          </Badge>
+                        ))}
                         {!dish.active && <Badge variant="warning">Inativo</Badge>}
                       </div>
-                      {(dish.prepTime || dish.servings) && (
-                        <div className="text-sm text-[var(--muted-foreground)] mt-1">
-                          {dish.prepTime && `${dish.prepTime} min`}
-                          {dish.prepTime && dish.servings && ' • '}
-                          {dish.servings && `${dish.servings} porções`}
-                        </div>
-                      )}
                     </div>
                     <Button
                       variant="ghost"
@@ -365,7 +366,6 @@ export default function MenuPage() {
             date={selectedDate}
             schedules={getScheduleForDay(selectedDate)}
             dishes={dishes.filter((d) => d.active)}
-            employees={employees}
             onSuccess={() => { handleDayModalClose(); fetchSchedules() }}
             onCancel={handleDayModalClose}
           />
@@ -419,24 +419,32 @@ interface DayEditFormProps {
   date: Date
   schedules: MealSchedule[]
   dishes: Dish[]
-  employees: Employee[]
   onSuccess: () => void
   onCancel: () => void
 }
 
-function DayEditForm({ date, schedules, dishes, employees, onSuccess, onCancel }: DayEditFormProps) {
-  const lunchSchedule = schedules.find((s) => s.mealType === 'ALMOCO')
-  const dinnerSchedule = schedules.find((s) => s.mealType === 'JANTAR')
-
-  const [lunchDishId, setLunchDishId] = useState(lunchSchedule?.dish.id ?? '')
-  const [dinnerDishId, setDinnerDishId] = useState(dinnerSchedule?.dish.id ?? '')
-  const [lunchEmployeeId, setLunchEmployeeId] = useState(lunchSchedule?.employee?.id ?? '')
-  const [dinnerEmployeeId, setDinnerEmployeeId] = useState(dinnerSchedule?.employee?.id ?? '')
+function DayEditForm({ date, schedules, dishes, onSuccess, onCancel }: DayEditFormProps) {
+  // Initialize state with current schedule values for each meal type
+  const [selectedDishes, setSelectedDishes] = useState<Record<MealType, string>>(() => {
+    const initial: Record<MealType, string> = {} as Record<MealType, string>
+    for (const mt of MEAL_TYPES) {
+      const schedule = schedules.find((s) => s.mealType === mt)
+      initial[mt] = schedule?.dish.id ?? ''
+    }
+    return initial
+  })
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const lunchDishes = dishes.filter((d) => d.category === 'ALMOCO')
-  const dinnerDishes = dishes.filter((d) => d.category === 'JANTAR')
+  // Get dishes that match a specific category (meal type maps to dish category)
+  const getDishesForMealType = (mealType: MealType) => {
+    // MealType and DishCategory have the same values
+    return dishes.filter((d) => d.categories.includes(mealType as unknown as DishCategory))
+  }
+
+  const handleDishChange = (mealType: MealType, dishId: string) => {
+    setSelectedDishes((prev) => ({ ...prev, [mealType]: dishId }))
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -444,38 +452,26 @@ function DayEditForm({ date, schedules, dishes, employees, onSuccess, onCancel }
     setError(null)
 
     try {
-      const dateStr = date.toISOString().split('T')[0]
+      // Format date as YYYY-MM-DD without timezone conversion
+      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
       const promises = []
 
-      if (lunchDishId) {
-        promises.push(
-          fetch('/api/meal-schedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              date: dateStr,
-              mealType: 'ALMOCO',
-              dishId: lunchDishId,
-              employeeId: lunchEmployeeId || null,
-            }),
-          })
-        )
-      }
-
-      if (dinnerDishId) {
-        promises.push(
-          fetch('/api/meal-schedule', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              date: dateStr,
-              mealType: 'JANTAR',
-              dishId: dinnerDishId,
-              employeeId: dinnerEmployeeId || null,
-            }),
-          })
-        )
+      for (const mealType of MEAL_TYPES) {
+        const dishId = selectedDishes[mealType]
+        if (dishId) {
+          promises.push(
+            fetch('/api/meal-schedule', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                date: dateStr,
+                mealType,
+                dishId,
+              }),
+            })
+          )
+        }
       }
 
       await Promise.all(promises)
@@ -493,57 +489,29 @@ function DayEditForm({ date, schedules, dishes, employees, onSuccess, onCancel }
         <div className="p-3 rounded-lg bg-red-100 text-red-800 text-sm">{error}</div>
       )}
 
-      <div>
-        <label className="block text-sm font-medium mb-1">🍚 Almoço</label>
-        <select
-          value={lunchDishId}
-          onChange={(e) => setLunchDishId(e.target.value)}
-          className="w-full h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
-        >
-          <option value="">(não definido)</option>
-          {lunchDishes.map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
-        {lunchDishId && (
-          <select
-            value={lunchEmployeeId}
-            onChange={(e) => setLunchEmployeeId(e.target.value)}
-            className="w-full h-10 px-3 mt-2 rounded-lg border border-[var(--border)] bg-[var(--background)]"
-          >
-            <option value="">Quem prepara: (não definido)</option>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>{e.name}</option>
-            ))}
-          </select>
-        )}
-      </div>
+      {MEAL_TYPES.map((mealType) => {
+        const availableDishes = getDishesForMealType(mealType)
+        // Only show meal types that have dishes available
+        if (availableDishes.length === 0) return null
 
-      <div>
-        <label className="block text-sm font-medium mb-1">🍲 Jantar</label>
-        <select
-          value={dinnerDishId}
-          onChange={(e) => setDinnerDishId(e.target.value)}
-          className="w-full h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
-        >
-          <option value="">(não definido)</option>
-          {dinnerDishes.map((d) => (
-            <option key={d.id} value={d.id}>{d.name}</option>
-          ))}
-        </select>
-        {dinnerDishId && (
-          <select
-            value={dinnerEmployeeId}
-            onChange={(e) => setDinnerEmployeeId(e.target.value)}
-            className="w-full h-10 px-3 mt-2 rounded-lg border border-[var(--border)] bg-[var(--background)]"
-          >
-            <option value="">Quem prepara: (não definido)</option>
-            {employees.map((e) => (
-              <option key={e.id} value={e.id}>{e.name}</option>
-            ))}
-          </select>
-        )}
-      </div>
+        return (
+          <div key={mealType}>
+            <label className="block text-sm font-medium mb-1">
+              {MEAL_TYPE_ICONS[mealType]} {MEAL_TYPE_LABELS[mealType]}
+            </label>
+            <select
+              value={selectedDishes[mealType]}
+              onChange={(e) => handleDishChange(mealType, e.target.value)}
+              className="w-full h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
+            >
+              <option value="">(não definido)</option>
+              {availableDishes.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+          </div>
+        )
+      })}
 
       <div className="flex gap-2 justify-end pt-2">
         <Button type="button" variant="secondary" onClick={onCancel} disabled={submitting}>
@@ -563,21 +531,33 @@ interface DishFormProps {
   onCancel: () => void
 }
 
+const DISH_CATEGORY_OPTIONS: DishCategory[] = ['CAFE_MANHA', 'ALMOCO', 'JANTAR', 'LANCHE', 'SOBREMESA', 'BEBIDA']
+
 function DishForm({ dish, onSuccess, onCancel }: DishFormProps) {
   const [name, setName] = useState(dish?.name ?? '')
-  const [description, setDescription] = useState(dish?.description ?? '')
-  const [category, setCategory] = useState<DishCategory>(dish?.category ?? 'ALMOCO')
-  const [prepTime, setPrepTime] = useState(dish?.prepTime?.toString() ?? '')
-  const [servings, setServings] = useState(dish?.servings?.toString() ?? '')
-  const [ingredients, setIngredients] = useState(dish?.ingredients?.join('\n') ?? '')
+  const [categories, setCategories] = useState<DishCategory[]>(dish?.categories ?? [])
   const [active, setActive] = useState(dish?.active ?? true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const toggleCategory = (category: DishCategory) => {
+    setCategories((prev) =>
+      prev.includes(category)
+        ? prev.filter((c) => c !== category)
+        : [...prev, category]
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
+
+    if (categories.length === 0) {
+      setError('Selecione pelo menos uma categoria')
+      setSubmitting(false)
+      return
+    }
 
     try {
       const url = dish ? `/api/dishes/${dish.id}` : '/api/dishes'
@@ -588,11 +568,7 @@ function DishForm({ dish, onSuccess, onCancel }: DishFormProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name,
-          description: description || null,
-          category,
-          prepTime: prepTime ? parseInt(prepTime) : null,
-          servings: servings ? parseInt(servings) : null,
-          ingredients: ingredients.split('\n').map((i) => i.trim()).filter(Boolean),
+          categories,
           active,
         }),
       })
@@ -628,64 +604,28 @@ function DishForm({ dish, onSuccess, onCancel }: DishFormProps) {
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">Categoria *</label>
-        <select
-          value={category}
-          onChange={(e) => setCategory(e.target.value as DishCategory)}
-          className="w-full h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
-        >
-          {Object.entries(DISH_CATEGORY_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {DISH_CATEGORY_ICONS[value as DishCategory]} {label}
-            </option>
+        <label className="block text-sm font-medium mb-2">Categorias *</label>
+        <div className="flex flex-wrap gap-2">
+          {DISH_CATEGORY_OPTIONS.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => toggleCategory(cat)}
+              className={`
+                px-3 py-2 rounded-lg border text-sm transition-colors
+                ${categories.includes(cat)
+                  ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
+                  : 'border-[var(--border)] hover:bg-[var(--secondary)]'
+                }
+              `}
+            >
+              {DISH_CATEGORY_ICONS[cat]} {DISH_CATEGORY_LABELS[cat]}
+            </button>
           ))}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium mb-1">Tempo de preparo (min)</label>
-          <Input
-            type="number"
-            value={prepTime}
-            onChange={(e) => setPrepTime(e.target.value)}
-            placeholder="60"
-            min={1}
-          />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Porções</label>
-          <Input
-            type="number"
-            value={servings}
-            onChange={(e) => setServings(e.target.value)}
-            placeholder="4"
-            min={1}
-          />
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-1">Ingredientes (um por linha)</label>
-        <textarea
-          value={ingredients}
-          onChange={(e) => setIngredients(e.target.value)}
-          placeholder="Arroz\nFeijão\nAlho\nSal"
-          className="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--background)] resize-none"
-          rows={4}
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-1">Descrição / Modo de preparo</label>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Opcional"
-          className="w-full px-3 py-2 rounded-lg border border-[var(--border)] bg-[var(--background)] resize-none"
-          rows={2}
-          maxLength={1000}
-        />
+        <p className="text-xs text-[var(--muted-foreground)] mt-1">
+          Selecione todas as refeições em que este prato pode ser servido
+        </p>
       </div>
 
       {dish && (

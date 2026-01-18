@@ -20,10 +20,9 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tasks         Task[]
-  specialTasks  SpecialTask[]
-  mealSchedules MealSchedule[]
-  printJobs     PrintJob[]
+  tasks        Task[]
+  specialTasks SpecialTask[]
+  printJobs    PrintJob[]
 
   @@map("employees")
 }
@@ -111,16 +110,12 @@ model SpecialTask {
 // ============================================
 
 model Dish {
-  id          String       @id @default(cuid())
-  name        String
-  description String?
-  category    DishCategory
-  prepTime    Int?         // Tempo de preparo em minutos
-  servings    Int?         // Número de porções
-  ingredients String[]     // Lista de ingredientes
-  active      Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id         String         @id @default(cuid())
+  name       String
+  categories DishCategory[] // Pode ser servido em múltiplas refeições (ex: almoço E jantar)
+  active     Boolean        @default(true)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
 
   mealSchedules MealSchedule[]
 
@@ -139,16 +134,14 @@ enum DishCategory {
 }
 
 model MealSchedule {
-  id         String   @id @default(cuid())
-  date       DateTime @db.Date
-  mealType   MealType
-  dishId     String
-  employeeId String?  // Quem vai preparar
-  notes      String?
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  mealType  MealType
+  dishId    String
+  notes     String?
+  createdAt DateTime @default(now())
 
-  dish     Dish      @relation(fields: [dishId], references: [id])
-  employee Employee? @relation(fields: [employeeId], references: [id])
+  dish Dish @relation(fields: [dishId], references: [id])
 
   @@unique([date, mealType])
   @@index([date])
@@ -159,6 +152,9 @@ enum MealType {
   CAFE_MANHA
   ALMOCO
   JANTAR
+  LANCHE
+  SOBREMESA
+  BEBIDA
 
   @@map("meal_type")
 }

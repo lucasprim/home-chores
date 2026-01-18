@@ -1,0 +1,19 @@
+services:
+  app:
+    image: ghcr.io/lucasprim/home-chores:latest
+    container_name: home-chores
+    hostname: tarefas
+    restart: unless-stopped
+    environment:
+      # REQUIRED: Update with your PostgreSQL connection string
+      - DATABASE_URL=${DATABASE_URL}
+      - APP_PIN=${APP_PIN:-1234}
+      - PRINTER_IP=${PRINTER_IP:-192.168.1.230}
+      - PORT=80
+      - TZ=America/Sao_Paulo
+    networks:
+      - lan
+
+networks:
+  lan:
+    external: true
