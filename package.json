@@ -45,7 +45,8 @@
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
     "prisma:seed": "tsx prisma/seed.ts",
-    "redeploy": "node --env-file=.env.local --import tsx scripts/redeploy.ts"
+    "redeploy": "node --env-file=.env.local --import tsx scripts/redeploy.ts",
+    "watch-deploy": "./scripts/watch-and-deploy.sh"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
