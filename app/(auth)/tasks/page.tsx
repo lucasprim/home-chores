@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button, Card, CardContent, Badge, Modal, Input, DropdownMenu } from '@/components/ui'
 import { Category, Role } from '@prisma/client'
-import { rruleToReadable, createDailyRule, createWeekdaysRule, createWeeklyRule, createMonthlyRule, parseRuleToPreset } from '@/lib/rrule-utils'
+import { rruleToReadable, createDailyRule, createWeekdaysRule, createWeeklyRule, createMonthlyRule, parseRuleToPreset, getRecurrenceFrequencyPriority } from '@/lib/rrule-utils'
 import { RecurrenceDialog, configToReadable, parseRruleToConfig, RecurrenceConfig } from '@/components/recurrence-dialog'
 
 interface Employee {
@@ -61,6 +61,29 @@ const CATEGORY_ICONS: Record<Category, string> = {
   CRIANCAS: '👶',
   PETS: '🐕',
   OUTRO: '📋',
+}
+
+// Logical category ordering: cleaning domain → food domain → home domain → care domain → other
+const CATEGORY_ORDER: Category[] = [
+  'LIMPEZA', 'LAVANDERIA', 'ORGANIZACAO',  // Cleaning domain
+  'COZINHA', 'COMPRAS',                     // Food domain
+  'JARDIM', 'MANUTENCAO',                   // Home domain
+  'CRIANCAS', 'PETS',                       // Care domain
+  'OUTRO',                                  // Always last
+]
+
+// Color scheme for each category (tailwind-compatible classes)
+const CATEGORY_COLORS: Record<Category, { border: string; bg: string; text: string }> = {
+  LIMPEZA: { border: 'border-l-blue-500', bg: 'bg-blue-50 dark:bg-blue-950/30', text: 'text-blue-700 dark:text-blue-300' },
+  LAVANDERIA: { border: 'border-l-purple-500', bg: 'bg-purple-50 dark:bg-purple-950/30', text: 'text-purple-700 dark:text-purple-300' },
+  ORGANIZACAO: { border: 'border-l-amber-500', bg: 'bg-amber-50 dark:bg-amber-950/30', text: 'text-amber-700 dark:text-amber-300' },
+  COZINHA: { border: 'border-l-orange-500', bg: 'bg-orange-50 dark:bg-orange-950/30', text: 'text-orange-700 dark:text-orange-300' },
+  COMPRAS: { border: 'border-l-teal-500', bg: 'bg-teal-50 dark:bg-teal-950/30', text: 'text-teal-700 dark:text-teal-300' },
+  MANUTENCAO: { border: 'border-l-slate-500', bg: 'bg-slate-50 dark:bg-slate-800/30', text: 'text-slate-700 dark:text-slate-300' },
+  JARDIM: { border: 'border-l-green-500', bg: 'bg-green-50 dark:bg-green-950/30', text: 'text-green-700 dark:text-green-300' },
+  CRIANCAS: { border: 'border-l-pink-500', bg: 'bg-pink-50 dark:bg-pink-950/30', text: 'text-pink-700 dark:text-pink-300' },
+  PETS: { border: 'border-l-rose-500', bg: 'bg-rose-50 dark:bg-rose-950/30', text: 'text-rose-700 dark:text-rose-300' },
+  OUTRO: { border: 'border-l-gray-500', bg: 'bg-gray-50 dark:bg-gray-800/30', text: 'text-gray-700 dark:text-gray-300' },
 }
 
 export default function TasksPage() {
@@ -205,6 +228,52 @@ export default function TasksPage() {
     return true
   })
 
+  // Group tasks by category, sorted by frequency within each category
+  const groupedTasks = useMemo(() => {
+    // First, sort all filtered tasks by frequency, then alphabetically
+    const sorted = [...filteredTasks].sort((a, b) => {
+      const freqA = getRecurrenceFrequencyPriority(a.rrule)
+      const freqB = getRecurrenceFrequencyPriority(b.rrule)
+      if (freqA !== freqB) return freqA - freqB
+      return a.title.localeCompare(b.title, 'pt-BR')
+    })
+
+    // Group by category
+    const groups = new Map<Category, Task[]>()
+    for (const task of sorted) {
+      const existing = groups.get(task.category) || []
+      groups.set(task.category, [...existing, task])
+    }
+
+    // Return in CATEGORY_ORDER, filtering empty categories
+    return CATEGORY_ORDER
+      .filter(cat => groups.has(cat))
+      .map(cat => ({ category: cat, tasks: groups.get(cat)! }))
+  }, [filteredTasks])
+
+  // Group special tasks by category
+  const groupedSpecialTasks = useMemo(() => {
+    // Sort by frequency, then alphabetically
+    const sorted = [...filteredSpecialTasks].sort((a, b) => {
+      const freqA = getRecurrenceFrequencyPriority(a.rrule)
+      const freqB = getRecurrenceFrequencyPriority(b.rrule)
+      if (freqA !== freqB) return freqA - freqB
+      return a.title.localeCompare(b.title, 'pt-BR')
+    })
+
+    // Group by category
+    const groups = new Map<Category, SpecialTask[]>()
+    for (const task of sorted) {
+      const existing = groups.get(task.category) || []
+      groups.set(task.category, [...existing, task])
+    }
+
+    // Return in CATEGORY_ORDER, filtering empty categories
+    return CATEGORY_ORDER
+      .filter(cat => groups.has(cat))
+      .map(cat => ({ category: cat, tasks: groups.get(cat)! }))
+  }, [filteredSpecialTasks])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -309,37 +378,56 @@ export default function TasksPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <div className="divide-y divide-[var(--border)] md:grid md:grid-cols-2 md:divide-y-0">
-                {filteredTasks.map((task, index) => (
-                  <div
-                    key={task.id}
-                    className={`
-                      flex items-center gap-2 px-3 py-2.5
-                      hover:bg-[var(--secondary)] transition-colors
-                      ${!task.active ? 'opacity-50' : ''}
-                      ${index % 2 === 1 ? 'md:border-l md:border-[var(--border)]' : ''}
-                      ${index >= 2 ? 'md:border-t md:border-[var(--border)]' : ''}
-                    `}
-                  >
-                    <span className="text-base flex-shrink-0">{CATEGORY_ICONS[task.category]}</span>
-                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                      <span className="font-medium truncate">{task.title}</span>
-                      <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
-                        · {task.employee?.name || 'Sem atrib.'} · {rruleToReadable(task.rrule)}
-                      </span>
-                      {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+            <div className="space-y-4">
+              {groupedTasks.map(({ category, tasks: categoryTasks }) => {
+                const colors = CATEGORY_COLORS[category]
+                return (
+                  <Card key={category} className={`overflow-hidden border-l-4 ${colors.border}`}>
+                    {/* Category Header */}
+                    <div className={`px-4 py-2.5 ${colors.bg} border-b border-[var(--border)]`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{CATEGORY_ICONS[category]}</span>
+                          <span className={`font-semibold ${colors.text}`}>
+                            {CATEGORY_LABELS[category]}
+                          </span>
+                        </div>
+                        <span className={`text-sm ${colors.text} opacity-75`}>
+                          ({categoryTasks.length})
+                        </span>
+                      </div>
                     </div>
-                    <DropdownMenu
-                      items={[
-                        { label: 'Editar', onClick: () => handleEditTask(task) },
-                        { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleActive(task) },
-                      ]}
-                    />
-                  </div>
-                ))}
-              </div>
-            </Card>
+                    {/* Tasks List */}
+                    <div className="divide-y divide-[var(--border)]">
+                      {categoryTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className={`
+                            flex items-center gap-2 px-4 py-2.5
+                            hover:bg-[var(--secondary)] transition-colors
+                            ${!task.active ? 'opacity-50' : ''}
+                          `}
+                        >
+                          <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                            <span className="font-medium truncate">{task.title}</span>
+                            <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
+                              · {task.employee?.name || 'Sem atrib.'} · {rruleToReadable(task.rrule)}
+                            </span>
+                            {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+                          </div>
+                          <DropdownMenu
+                            items={[
+                              { label: 'Editar', onClick: () => handleEditTask(task) },
+                              { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleActive(task) },
+                            ]}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
           )}
         </>
       )}
@@ -367,38 +455,57 @@ export default function TasksPage() {
               </CardContent>
             </Card>
           ) : (
-            <Card>
-              <div className="divide-y divide-[var(--border)] md:grid md:grid-cols-2 md:divide-y-0">
-                {filteredSpecialTasks.map((task, index) => (
-                  <div
-                    key={task.id}
-                    className={`
-                      flex items-center gap-2 px-3 py-2.5
-                      hover:bg-[var(--secondary)] transition-colors
-                      ${!task.active ? 'opacity-50' : ''}
-                      ${index % 2 === 1 ? 'md:border-l md:border-[var(--border)]' : ''}
-                      ${index >= 2 ? 'md:border-t md:border-[var(--border)]' : ''}
-                    `}
-                  >
-                    <span className="text-base flex-shrink-0">{CATEGORY_ICONS[task.category]}</span>
-                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                      <span className="font-medium truncate">{task.title}</span>
-                      <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
-                        · {task.employee?.name || 'Sem atrib.'} · {task.dueDays}d
-                      </span>
-                      {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+            <div className="space-y-4">
+              {groupedSpecialTasks.map(({ category, tasks: categoryTasks }) => {
+                const colors = CATEGORY_COLORS[category]
+                return (
+                  <Card key={category} className={`overflow-hidden border-l-4 ${colors.border}`}>
+                    {/* Category Header */}
+                    <div className={`px-4 py-2.5 ${colors.bg} border-b border-[var(--border)]`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{CATEGORY_ICONS[category]}</span>
+                          <span className={`font-semibold ${colors.text}`}>
+                            {CATEGORY_LABELS[category]}
+                          </span>
+                        </div>
+                        <span className={`text-sm ${colors.text} opacity-75`}>
+                          ({categoryTasks.length})
+                        </span>
+                      </div>
                     </div>
-                    <DropdownMenu
-                      items={[
-                        { label: 'Editar', onClick: () => handleEditSpecialTask(task) },
-                        { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleSpecialTaskActive(task) },
-                        { label: 'Excluir', onClick: () => handleDeleteSpecialTask(task), variant: 'destructive' },
-                      ]}
-                    />
-                  </div>
-                ))}
-              </div>
-            </Card>
+                    {/* Tasks List */}
+                    <div className="divide-y divide-[var(--border)]">
+                      {categoryTasks.map((task) => (
+                        <div
+                          key={task.id}
+                          className={`
+                            flex items-center gap-2 px-4 py-2.5
+                            hover:bg-[var(--secondary)] transition-colors
+                            ${!task.active ? 'opacity-50' : ''}
+                          `}
+                        >
+                          <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                            <span className="font-medium truncate">{task.title}</span>
+                            <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
+                              · {task.employee?.name || 'Sem atrib.'} · {task.dueDays}d
+                            </span>
+                            {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
+                          </div>
+                          <DropdownMenu
+                            items={[
+                              { label: 'Editar', onClick: () => handleEditSpecialTask(task) },
+                              { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleSpecialTaskActive(task) },
+                              { label: 'Excluir', onClick: () => handleDeleteSpecialTask(task), variant: 'destructive' },
+                            ]}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
           )}
         </>
       )}

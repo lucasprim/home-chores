@@ -150,3 +150,79 @@ export function isTaskScheduledForDate(rruleStr: string, date: Date): boolean {
     return false
   }
 }
+
+/**
+ * Returns a priority number for sorting tasks by frequency.
+ * Lower numbers = more frequent = appear first.
+ *
+ * Priority scale:
+ * 1 = daily
+ * 2 = weekdays (5 days)
+ * 3-9 = weekly (more days = lower number, so 6 days = 3, 1 day = 9)
+ * 10 = monthly
+ * 20 = yearly
+ * 100 = custom/unknown
+ */
+export function getRecurrenceFrequencyPriority(rruleStr: string): number {
+  const normalizedRule = rruleStr.replace('RRULE:', '')
+
+  // Check for daily
+  if (normalizedRule === 'FREQ=DAILY') {
+    return 1
+  }
+
+  // Check for weekdays preset
+  if (normalizedRule === 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR') {
+    return 2
+  }
+
+  try {
+    const rule = RRule.fromString(normalizedRule)
+    const options = rule.options
+
+    // Daily frequency
+    if (options.freq === RRule.DAILY) {
+      if (options.interval && options.interval > 1) {
+        // Every N days - treat as less frequent than daily
+        return Math.min(options.interval, 9)
+      }
+      return 1
+    }
+
+    // Weekly with specific days
+    if (options.freq === RRule.WEEKLY && options.byweekday) {
+      const numDays = options.byweekday.length
+
+      // 7 days = daily (priority 1)
+      if (numDays === 7) return 1
+
+      // 5 weekdays check
+      const weekdays = options.byweekday.map((d: Weekday | number) =>
+        typeof d === 'number' ? d : d.weekday
+      )
+      const isWeekdays = numDays === 5 &&
+        !weekdays.includes(5) && !weekdays.includes(6) &&
+        weekdays.includes(0) && weekdays.includes(1) &&
+        weekdays.includes(2) && weekdays.includes(3) && weekdays.includes(4)
+      if (isWeekdays) return 2
+
+      // More days = lower priority number (more frequent)
+      // 6 days = 3, 5 days = 4, 4 days = 5, 3 days = 6, 2 days = 7, 1 day = 8
+      return 9 - numDays
+    }
+
+    // Monthly
+    if (options.freq === RRule.MONTHLY) {
+      return 10
+    }
+
+    // Yearly
+    if (options.freq === RRule.YEARLY) {
+      return 20
+    }
+
+    return 100 // Unknown/custom
+  } catch {
+    return 100 // Parse error - treat as custom
+  }
+}
