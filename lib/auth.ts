@@ -3,6 +3,9 @@ import { cookies } from 'next/headers'
 const AUTH_COOKIE_NAME = 'home-chores-auth'
 const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+// Allow disabling secure cookies for LAN deployments without HTTPS
+const SECURE_COOKIES = process.env.SECURE_COOKIES !== 'false'
+
 export async function verifyPin(pin: string): Promise<boolean> {
   const correctPin = process.env.APP_PIN || '1234'
   return pin === correctPin
@@ -14,7 +17,7 @@ export async function createSession(): Promise<void> {
 
   cookieStore.set(AUTH_COOKIE_NAME, 'authenticated', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: SECURE_COOKIES,
     sameSite: 'lax',
     expires: expiresAt,
     path: '/',
