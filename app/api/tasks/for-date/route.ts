@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { TaskType } from '@prisma/client'
 import { isTaskScheduledForDate } from '@/lib/rrule-utils'
 
 /**
  * GET /api/tasks/for-date?date=YYYY-MM-DD
  *
- * Returns tasks and special tasks that should appear on the print list for a given date.
+ * Returns tasks of all types that should appear on the print list for a given date.
  * This is a read-only preview - no tracking of completion or occurrences.
  */
 export async function GET(request: NextRequest) {
@@ -30,8 +31,8 @@ export async function GET(request: NextRequest) {
 
     const dayOfWeek = date.getDay() // 0=Sun, 1=Mon, ...
 
-    // Get all active regular tasks
-    const tasks = await prisma.task.findMany({
+    // Get all active tasks from the unified table
+    const allTasks = await prisma.task.findMany({
       where: {
         active: true,
         ...(employeeId && { employeeId }),
@@ -43,37 +44,27 @@ export async function GET(request: NextRequest) {
       },
     })
 
-    // Filter tasks that are scheduled for this date based on rrule
-    const scheduledTasks = tasks.filter((task) => {
-      // Check if task is scheduled for this date based on rrule
-      if (!isTaskScheduledForDate(task.rrule, date)) {
-        return false
-      }
-      // Check if employee works on this day
-      if (task.employee && !task.employee.workDays.includes(dayOfWeek)) {
-        return false
-      }
-      return true
-    })
-
-    // Get all active special tasks
-    const specialTasks = await prisma.specialTask.findMany({
-      where: {
-        active: true,
-        ...(employeeId && { employeeId }),
-      },
-      include: {
-        employee: {
-          select: { id: true, name: true, role: true, workDays: true },
-        },
-      },
-    })
-
-    // Filter special tasks that are scheduled for this date based on rrule
-    const scheduledSpecialTasks = specialTasks
+    // Filter RECURRING tasks scheduled for this date
+    const recurringTasks = allTasks
+      .filter((task) => task.taskType === TaskType.RECURRING)
       .filter((task) => {
         // Check if task is scheduled for this date based on rrule
-        if (!isTaskScheduledForDate(task.rrule, date)) {
+        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) {
+          return false
+        }
+        // Check if employee works on this day
+        if (task.employee && !task.employee.workDays.includes(dayOfWeek)) {
+          return false
+        }
+        return true
+      })
+
+    // Filter SPECIAL tasks scheduled for this date
+    const specialTasks = allTasks
+      .filter((task) => task.taskType === TaskType.SPECIAL)
+      .filter((task) => {
+        // Check if task is scheduled for this date based on rrule
+        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) {
           return false
         }
         // Check if employee works on this day
@@ -85,7 +76,7 @@ export async function GET(request: NextRequest) {
       .map((task) => {
         // Calculate due date (appearDate + dueDays)
         const dueDate = new Date(date)
-        dueDate.setDate(dueDate.getDate() + task.dueDays)
+        dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
         return {
           ...task,
           appearDate: dateParam,
@@ -93,13 +84,34 @@ export async function GET(request: NextRequest) {
         }
       })
 
+    // Filter ONE_OFF tasks (pending, not yet printed)
+    const oneOffTasks = allTasks
+      .filter((task) => task.taskType === TaskType.ONE_OFF && task.printedAt === null)
+      .filter((task) => {
+        // If employee is assigned, check if they work on this day
+        if (task.employee && !task.employee.workDays.includes(dayOfWeek)) {
+          return false
+        }
+        return true
+      })
+      .map((task) => {
+        // Calculate due date (today + dueDays)
+        const dueDate = new Date(date)
+        dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
+        return {
+          ...task,
+          dueDate: dueDate.toISOString().split('T')[0],
+        }
+      })
+
     return NextResponse.json({
       date: dateParam,
-      tasks: scheduledTasks.map((task) => ({
+      tasks: recurringTasks.map((task) => ({
         id: task.id,
         title: task.title,
         description: task.description,
         category: task.category,
+        taskType: task.taskType,
         employee: task.employee
           ? {
               id: task.employee.id,
@@ -108,13 +120,30 @@ export async function GET(request: NextRequest) {
             }
           : null,
       })),
-      specialTasks: scheduledSpecialTasks.map((task) => ({
+      specialTasks: specialTasks.map((task) => ({
         id: task.id,
         title: task.title,
         description: task.description,
         category: task.category,
+        taskType: task.taskType,
         dueDays: task.dueDays,
         appearDate: task.appearDate,
+        dueDate: task.dueDate,
+        employee: task.employee
+          ? {
+              id: task.employee.id,
+              name: task.employee.name,
+              role: task.employee.role,
+            }
+          : null,
+      })),
+      oneOffTasks: oneOffTasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        category: task.category,
+        taskType: task.taskType,
+        dueDays: task.dueDays,
         dueDate: task.dueDate,
         employee: task.employee
           ? {

@@ -4,7 +4,7 @@
 
 ## Current Status
 
-**Phase:** Phase 5 Complete - Special Tasks & Multi-page Printing
+**Phase:** Task System Unification Complete
 **Next Task:** None - All features implemented!
 **Blocked:** No
 
@@ -57,7 +57,61 @@
 - [x] Print jobs API routes
 - [x] Scheduler service (node-cron)
 
+### Phase 6: One-Off Tasks (Tarefas Avulsas)
+> Tasks that print only once on the next print opportunity
+
+- [x] OneOffTask model in Prisma schema
+- [x] One-off tasks API routes (CRUD)
+- [x] Update for-date API to include pending one-off tasks
+- [x] Update print API to include and mark one-off tasks as printed
+- [x] Update scheduler to include and mark one-off tasks as printed
+- [x] "Avulsa" tab in Tasks page with pending/printed status
+- [x] One-off tasks section in Today preview (orange highlight)
+
 ## Completed Work
+
+### 2026-01-18: Task System Unification
+- **Major Refactoring**: Unified Task, SpecialTask, and OneOffTask models into single Task model
+- **Benefits**:
+  - Single database table (`tasks`) instead of 3 separate tables
+  - Single API (`/api/tasks`) with `?type=` filter instead of 3 separate APIs
+  - Single form component with type selector
+  - Consistent deletion behavior (soft-delete via `active=false`)
+  - ~300 fewer lines of code
+- **Schema Changes**:
+  - Added `TaskType` enum: `RECURRING`, `SPECIAL`, `ONE_OFF`
+  - Added `taskType`, `dueDays`, `printedAt` fields to Task model
+  - Made `rrule` optional (null for ONE_OFF tasks)
+  - Removed SpecialTask and OneOffTask models
+- **API Changes**:
+  - `/api/tasks` now handles all types with `?type=` filter
+  - Removed `/api/special-tasks` and `/api/one-off-tasks` routes
+  - Updated `/api/tasks/for-date`, `/api/print`, `/api/print/preview` for unified model
+  - Updated `lib/scheduler.ts` for unified model
+- **UI Changes**:
+  - Tasks page: Two tabs "Ativas" | "Arquivo" instead of three
+  - Type filter dropdown (Todas | Recorrentes | Especiais | Avulsas)
+  - Archive tab shows printed ONE_OFF tasks with "Reimprimir" action
+  - Form type selector uses unified TaskType enum
+
+### 2026-01-18: One-Off Tasks (Tarefas Avulsas)
+- **New Feature**: One-off tasks that appear only once on the next print opportunity
+- **Use Case**: Tasks like "unpack luggage from trip", "clean carpet after pet accident"
+- **Key Concept**: Unlike recurring/special tasks with rrule, one-off tasks have no schedule - they just appear on the next print when the assigned employee works
+- **Database**: New `OneOffTask` model with `printedAt` field to track print status
+- **API Routes**:
+  - `/api/one-off-tasks` - GET/POST for listing and creating
+  - `/api/one-off-tasks/[id]` - GET/PUT/DELETE for CRUD
+  - Updated `/api/tasks/for-date` to include pending one-off tasks
+  - Updated `/api/print` to include and mark as printed after successful print
+  - Updated `lib/scheduler.ts` with same logic for scheduled prints
+- **UI Changes**:
+  - Tasks page: Third tab "Avulsas" showing pending tasks with orange highlight
+  - Tasks page: "Mostrar impressas" toggle to see printed tasks
+  - Tasks page: "Reimprimir" action to reset a printed task
+  - Today page: Orange-highlighted section for pending one-off tasks
+  - Task form: Three-way toggle (Recorrente / Especial / Avulsa)
+- **Print Behavior**: After successful print, one-off tasks are marked with `printedAt` timestamp and `active=false`
 
 ### 2026-01-17: Simplify Dish Model - Multi-Category Support
 - **Simplified Dish model**: Now only has `name` and `categories` fields
@@ -222,7 +276,7 @@
 app/
 ├── (auth)/           # Protected routes
 │   ├── today/        # Print preview for any date (read-only)
-│   ├── tasks/        # Task management (recurring + special tasks with tabs)
+│   ├── tasks/        # Unified task management (Ativas | Arquivo tabs)
 │   ├── employees/    # Employee management
 │   ├── menu/         # Meal planning calendar & dishes
 │   ├── print/        # Manual printing
@@ -232,19 +286,19 @@ app/
 └── api/
     ├── auth/         # Login/logout
     ├── employees/    # CRUD
-    ├── tasks/        # CRUD (regular tasks)
-    │   └── for-date/ # Get tasks for a specific date (filtered by rrule)
-    ├── special-tasks/ # Special task CRUD
+    ├── tasks/        # Unified task CRUD (supports type=RECURRING|SPECIAL|ONE_OFF)
+    │   ├── [id]/     # Single task operations
+    │   └── for-date/ # Get tasks for a specific date (filtered by rrule/type)
     ├── dishes/       # CRUD
     ├── meal-schedule/ # Calendar & randomize
-    ├── print/        # Preview & execute
+    ├── print/        # Preview & execute (handles all task types)
     ├── print-jobs/   # Print jobs CRUD, run, logs
     └── settings/     # Settings & printer test
 lib/
 ├── prisma.ts         # Database client
 ├── printer.ts        # Thermal printer functions
 ├── rrule-utils.ts    # Recurrence rule utilities (includes isTaskScheduledForDate)
-└── scheduler.ts      # node-cron scheduler for print jobs
+└── scheduler.ts      # node-cron scheduler for print jobs (handles all task types)
 instrumentation.ts    # Next.js server startup hook (initializes scheduler)
 ```
 
@@ -271,10 +325,13 @@ instrumentation.ts    # Next.js server startup hook (initializes scheduler)
 > **Key Concept**: This is a PRINT LIST GENERATOR, not a task tracker. No completion tracking.
 
 - **Employees**: Create, edit, delete employees with roles and work days
-- **Tasks**: Create recurring tasks with flexible schedules (daily, weekdays, specific days, monthly)
-- **Special Tasks**: Tasks that print on own paper with due date (integrated in Tasks page under "Especiais" tab)
-- **Today**: Preview of what would be printed for any date (read-only, no completion tracking)
-- **Print**: Preview and print daily tasks or weekly menu to thermal printer (multi-page with partial cuts)
+- **Unified Tasks**: Single task model with three types:
+  - `RECURRING`: Regular tasks with rrule schedule
+  - `SPECIAL`: Tasks with rrule schedule + due date (prints on own paper)
+  - `ONE_OFF`: Tasks that print once on next opportunity (moves to Archive after print)
+- **Tasks Page**: Two tabs - "Ativas" (active tasks) and "Arquivo" (printed one-off tasks)
+- **Today**: Preview of what would be printed for any date (read-only, shows all task types)
+- **Print**: Preview and print to thermal printer (multi-page with partial cuts)
 - **Print Jobs**: Schedule automated printing with cron-like scheduling
 - **Menu**: Plan meals with dish repertoire, calendar view, randomize feature
 - **Settings**: Configure house name, printer IP, timezone, change PIN

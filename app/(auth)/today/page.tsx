@@ -32,10 +32,25 @@ interface SpecialTask {
   } | null
 }
 
+interface OneOffTask {
+  id: string
+  title: string
+  description: string | null
+  category: Category
+  dueDays: number
+  dueDate: string
+  employee: {
+    id: string
+    name: string
+    role: Role
+  } | null
+}
+
 interface TasksForDateResponse {
   date: string
   tasks: Task[]
   specialTasks: SpecialTask[]
+  oneOffTasks: OneOffTask[]
 }
 
 const CATEGORY_ICONS: Record<Category, string> = {
@@ -118,6 +133,7 @@ function TodayPageContent() {
 
   const [tasks, setTasks] = useState<Task[]>([])
   const [specialTasks, setSpecialTasks] = useState<SpecialTask[]>([])
+  const [oneOffTasks, setOneOffTasks] = useState<OneOffTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -132,6 +148,7 @@ function TodayPageContent() {
       const data: TasksForDateResponse = await res.json()
       setTasks(data.tasks)
       setSpecialTasks(data.specialTasks)
+      setOneOffTasks(data.oneOffTasks || [])
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido')
@@ -179,6 +196,7 @@ function TodayPageContent() {
   const groups = Object.values(groupedTasks)
   const totalTasks = tasks.length
   const totalSpecialTasks = specialTasks.length
+  const totalOneOffTasks = oneOffTasks.length
 
   return (
     <div className="space-y-4">
@@ -208,7 +226,7 @@ function TodayPageContent() {
         <Button
           variant="secondary"
           onClick={() => router.push(`/print?date=${getDateString(currentDate)}`)}
-          disabled={totalTasks === 0 && totalSpecialTasks === 0}
+          disabled={totalTasks === 0 && totalSpecialTasks === 0 && totalOneOffTasks === 0}
         >
           Imprimir
         </Button>
@@ -264,8 +282,43 @@ function TodayPageContent() {
             </div>
           )}
 
+          {/* One-off Tasks Section */}
+          {totalOneOffTasks > 0 && (
+            <div className="space-y-2">
+              <h2 className="text-sm font-medium text-[var(--muted-foreground)]">
+                Tarefas Avulsas ({totalOneOffTasks})
+              </h2>
+              {oneOffTasks.map((task) => (
+                <Card
+                  key={task.id}
+                  className="border-l-4 border-l-orange-500 bg-orange-50 dark:bg-orange-950/20"
+                >
+                  <CardContent className="py-3">
+                    <div className="flex items-start gap-3">
+                      <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{task.title}</span>
+                          <Badge className="bg-orange-500 text-white">Vence: {formatDueDate(task.dueDate)}</Badge>
+                        </div>
+                        {task.description && (
+                          <p className="text-sm text-[var(--muted-foreground)] mt-1">
+                            {task.description}
+                          </p>
+                        )}
+                        <p className="text-xs text-[var(--muted-foreground)] mt-1">
+                          {task.employee ? task.employee.name : 'Sem atribuição'}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
           {/* Regular Tasks Section */}
-          {totalTasks === 0 && totalSpecialTasks === 0 ? (
+          {totalTasks === 0 && totalSpecialTasks === 0 && totalOneOffTasks === 0 ? (
             <Card>
               <CardContent className="py-8 text-center">
                 <div className="text-4xl mb-4">📋</div>
@@ -315,12 +368,14 @@ function TodayPageContent() {
         </>
       )}
 
-      {(totalTasks > 0 || totalSpecialTasks > 0) && (
+      {(totalTasks > 0 || totalSpecialTasks > 0 || totalOneOffTasks > 0) && (
         <div className="text-center text-sm text-[var(--muted-foreground)]">
           {totalTasks} tarefa{totalTasks !== 1 ? 's' : ''} regular
           {totalTasks !== 1 ? 'es' : ''}
           {totalSpecialTasks > 0 &&
             ` • ${totalSpecialTasks} especial${totalSpecialTasks !== 1 ? 'is' : ''}`}
+          {totalOneOffTasks > 0 &&
+            ` • ${totalOneOffTasks} avulsa${totalOneOffTasks !== 1 ? 's' : ''}`}
         </div>
       )}
     </div>

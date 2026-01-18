@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { TaskType } from '@prisma/client'
 import { isTaskScheduledForDate } from '@/lib/rrule-utils'
 
 const ROLE_LABELS: Record<string, string> = {
@@ -70,8 +71,8 @@ export async function GET(request: NextRequest) {
     if (type === 'DAILY_TASKS') {
       const dayOfWeek = date.getDay()
 
-      // Get all active tasks
-      const tasks = await prisma.task.findMany({
+      // Get all active tasks from the unified table
+      const allTasks = await prisma.task.findMany({
         where: {
           active: true,
           ...(employeeId && { employeeId }),
@@ -83,14 +84,16 @@ export async function GET(request: NextRequest) {
         },
       })
 
-      // Filter tasks scheduled for this date
-      const scheduledTasks = tasks.filter((task) => {
-        if (!isTaskScheduledForDate(task.rrule, date)) return false
-        if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-        return true
-      })
+      // Filter RECURRING tasks scheduled for this date
+      const scheduledTasks = allTasks
+        .filter((task) => task.taskType === TaskType.RECURRING)
+        .filter((task) => {
+          if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
+          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
+          return true
+        })
 
-      // Get special tasks scheduled for this date (if enabled)
+      // Get SPECIAL tasks scheduled for this date (if enabled)
       let scheduledSpecialTasks: Array<{
         id: string
         title: string
@@ -101,37 +104,46 @@ export async function GET(request: NextRequest) {
       }> = []
 
       if (includeSpecialTasks) {
-        const specialTasks = await prisma.specialTask.findMany({
-          where: {
-            active: true,
-            ...(employeeId && { employeeId }),
-          },
-          include: {
-            employee: {
-              select: { id: true, name: true, role: true, workDays: true },
-            },
-          },
-        })
-
-        scheduledSpecialTasks = specialTasks
+        scheduledSpecialTasks = allTasks
+          .filter((task) => task.taskType === TaskType.SPECIAL)
           .filter((task) => {
-            if (!isTaskScheduledForDate(task.rrule, date)) return false
+            if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
             if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
             return true
           })
           .map((task) => {
             const dueDate = new Date(date)
-            dueDate.setDate(dueDate.getDate() + task.dueDays)
+            dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
             return {
               id: task.id,
               title: task.title,
               description: task.description,
               category: task.category,
-              dueDays: task.dueDays,
+              dueDays: task.dueDays || 7,
               dueDate,
             }
           })
       }
+
+      // Get pending ONE_OFF tasks (not printed yet, active)
+      const pendingOneOffTasks = allTasks
+        .filter((task) => task.taskType === TaskType.ONE_OFF && task.printedAt === null)
+        .filter((task) => {
+          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
+          return true
+        })
+        .map((task) => {
+          const dueDate = new Date(date)
+          dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
+          return {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            category: task.category,
+            dueDays: task.dueDays || 7,
+            dueDate,
+          }
+        })
 
       // Get meals for the date
       const dateStr = date.toISOString().split('T')[0]!
@@ -237,6 +249,27 @@ export async function GET(request: NextRequest) {
         })
       }
 
+      // Pages: One per one-off task (printed like special tasks)
+      for (const task of pendingOneOffTasks) {
+        const taskDueDate = new Date(task.dueDate)
+        taskDueDate.setHours(0, 0, 0, 0)
+        const daysRemaining = Math.ceil(
+          (taskDueDate.getTime() - normalizedDate.getTime()) / (1000 * 60 * 60 * 24)
+        )
+
+        pages.push({
+          type: 'SPECIAL_TASK',
+          title: 'Tarefa Avulsa',
+          task: {
+            title: task.title,
+            description: task.description,
+            dueDate: taskDueDate.toLocaleDateString('pt-BR'),
+            daysRemaining,
+            category: task.category,
+          },
+        })
+      }
+
       const formattedDate = date.toLocaleDateString('pt-BR', {
         weekday: 'long',
         day: '2-digit',
@@ -251,6 +284,7 @@ export async function GET(request: NextRequest) {
         pages,
         totalTasks: scheduledTasks.length,
         totalSpecialTasks: scheduledSpecialTasks.length,
+        totalOneOffTasks: pendingOneOffTasks.length,
         hasMenu: !!(lunch || dinner),
       })
     }

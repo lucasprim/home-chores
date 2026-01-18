@@ -7,6 +7,21 @@
 
 set -e
 
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Load environment variables from .env.local or .env
+if [ -f "$PROJECT_DIR/.env.local" ]; then
+    set -a
+    source "$PROJECT_DIR/.env.local"
+    set +a
+elif [ -f "$PROJECT_DIR/.env" ]; then
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -49,8 +64,8 @@ fi
 echo -e "${BLUE}Watching workflow run: ${YELLOW}$RUN_ID${NC}"
 echo ""
 
-# Show run info
-gh run view "$RUN_ID"
+# Show run info (disable pager)
+GH_PAGER="" gh run view "$RUN_ID"
 echo ""
 
 # Watch the run
@@ -66,8 +81,6 @@ if gh run watch "$RUN_ID" --exit-status; then
     echo ""
 
     # Run the redeploy script
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
     if [ -f "$SCRIPT_DIR/redeploy.ts" ]; then
         npx tsx "$SCRIPT_DIR/redeploy.ts"
     else

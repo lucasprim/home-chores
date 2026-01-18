@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { Category } from '@prisma/client'
+import { Category, TaskType } from '@prisma/client'
 import { RRule } from 'rrule'
 
 type RouteParams = { params: Promise<{ id: string }> }
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       where: { id },
       include: {
         employee: {
-          select: { id: true, name: true, role: true },
+          select: { id: true, name: true, role: true, workDays: true },
         },
       },
     })
@@ -31,13 +31,19 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
     const body = await request.json()
-    const { title, description, category, employeeId, rrule, active } = body
+    const { title, description, category, employeeId, taskType, rrule, dueDays, active, resetPrinted } = body
 
     const existing = await prisma.task.findUnique({ where: { id } })
     if (!existing) {
       return NextResponse.json({ error: 'Tarefa não encontrada' }, { status: 404 })
     }
 
+    // Determine effective task type (use new one if provided, else keep existing)
+    const effectiveType = (taskType && Object.values(TaskType).includes(taskType))
+      ? taskType as TaskType
+      : existing.taskType
+
+    // Title validation
     if (title !== undefined) {
       if (typeof title !== 'string' || title.trim().length < 3) {
         return NextResponse.json({ error: 'Título deve ter pelo menos 3 caracteres' }, { status: 400 })
@@ -47,11 +53,17 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // Category validation
     if (category !== undefined && !Object.values(Category).includes(category)) {
       return NextResponse.json({ error: 'Categoria inválida' }, { status: 400 })
     }
 
+    // Rrule validation (for RECURRING and SPECIAL)
     if (rrule !== undefined) {
+      if (effectiveType === TaskType.ONE_OFF) {
+        // ONE_OFF tasks should not have rrule
+        return NextResponse.json({ error: 'Tarefas avulsas não podem ter recorrência' }, { status: 400 })
+      }
       try {
         RRule.fromString(rrule)
       } catch {
@@ -59,6 +71,15 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // DueDays validation (for SPECIAL and ONE_OFF)
+    if (dueDays !== undefined) {
+      const parsedDueDays = parseInt(dueDays)
+      if (isNaN(parsedDueDays) || parsedDueDays < 1 || parsedDueDays > 365) {
+        return NextResponse.json({ error: 'Prazo deve ser entre 1 e 365 dias' }, { status: 400 })
+      }
+    }
+
+    // Employee validation
     if (employeeId !== undefined && employeeId !== null) {
       const employee = await prisma.employee.findUnique({ where: { id: employeeId } })
       if (!employee) {
@@ -66,19 +87,32 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // Build update data
+    const dataUpdates: Record<string, unknown> = {}
+
+    if (title !== undefined) dataUpdates.title = title.trim()
+    if (description !== undefined) dataUpdates.description = description?.trim() || null
+    if (category !== undefined) dataUpdates.category = category
+    if (employeeId !== undefined) dataUpdates.employeeId = employeeId || null
+    if (taskType !== undefined && Object.values(TaskType).includes(taskType)) {
+      dataUpdates.taskType = taskType
+    }
+    if (rrule !== undefined) dataUpdates.rrule = rrule
+    if (dueDays !== undefined) dataUpdates.dueDays = parseInt(dueDays)
+    if (active !== undefined) dataUpdates.active = active
+
+    // Reset printed state for ONE_OFF tasks (for re-printing)
+    if (resetPrinted === true && effectiveType === TaskType.ONE_OFF) {
+      dataUpdates.printedAt = null
+      dataUpdates.active = true
+    }
+
     const task = await prisma.task.update({
       where: { id },
-      data: {
-        ...(title !== undefined && { title: title.trim() }),
-        ...(description !== undefined && { description: description?.trim() || null }),
-        ...(category !== undefined && { category }),
-        ...(employeeId !== undefined && { employeeId: employeeId || null }),
-        ...(rrule !== undefined && { rrule }),
-        ...(active !== undefined && { active }),
-      },
+      data: dataUpdates,
       include: {
         employee: {
-          select: { id: true, name: true, role: true },
+          select: { id: true, name: true, role: true, workDays: true },
         },
       },
     })
@@ -98,7 +132,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
       return NextResponse.json({ error: 'Tarefa não encontrada' }, { status: 404 })
     }
 
-    // Soft delete - just deactivate
+    // Soft delete - just deactivate (consistent across all task types)
     await prisma.task.update({
       where: { id },
       data: { active: false },

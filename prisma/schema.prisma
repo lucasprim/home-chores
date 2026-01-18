@@ -20,9 +20,8 @@ model Employee {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tasks        Task[]
-  specialTasks SpecialTask[]
-  printJobs    PrintJob[]
+  tasks     Task[]
+  printJobs PrintJob[]
 
   @@map("employees")
 }
@@ -43,20 +42,28 @@ enum Role {
 // ============================================
 
 model Task {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
   description String?
   category    Category
-  rrule       String   // Formato iCalendar RRULE - armazenado como string, parseado em runtime
   employeeId  String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  active      Boolean   @default(true)
+
+  // Type-specific fields
+  taskType    TaskType  @default(RECURRING)
+  rrule       String?   // Required for RECURRING and SPECIAL, null for ONE_OFF
+  dueDays     Int?      // Required for SPECIAL and ONE_OFF (default 7)
+  printedAt   DateTime? // Only for ONE_OFF (null = pending, set after print)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   employee Employee? @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
   @@index([active])
+  @@index([taskType])
+  @@index([printedAt])
   @@map("tasks")
 }
 
@@ -75,35 +82,16 @@ enum Category {
   @@map("category")
 }
 
-// NOTE: No TaskOccurrence model - this system does not track task completion.
-// Tasks are simply printed based on their rrule pattern.
+enum TaskType {
+  RECURRING    // Regular task, prints daily per rrule
+  SPECIAL      // Prints on own paper with due date, per rrule
+  ONE_OFF      // Prints once on next opportunity, then archived
 
-// ============================================
-// TAREFAS ESPECIAIS (Tasks that print on separate paper with due date info)
-// ============================================
-
-// Special tasks print on their own paper with a due date shown as info
-model SpecialTask {
-  id          String   @id @default(cuid())
-  title       String
-  description String?
-  category    Category
-  rrule       String   // Formato iCalendar RRULE - when task appears on print list
-  dueDays     Int      @default(7) // Days to show as "due date" on print (informational only)
-  employeeId  String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  employee Employee? @relation(fields: [employeeId], references: [id])
-
-  @@index([employeeId])
-  @@index([active])
-  @@map("special_tasks")
+  @@map("task_type")
 }
 
-// NOTE: No SpecialTaskOccurrence model - this system does not track task completion.
-// Special tasks are printed based on their rrule pattern, with dueDays shown as info.
+// NOTE: No TaskOccurrence model - this system does not track task completion.
+// Tasks are simply printed based on their rrule pattern.
 
 // ============================================
 // CARDÁPIO

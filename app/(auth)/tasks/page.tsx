@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button, Card, CardContent, Badge, Modal, Input, DropdownMenu } from '@/components/ui'
-import { Category, Role } from '@prisma/client'
+import { Category, Role, TaskType } from '@prisma/client'
 import { rruleToReadable, createDailyRule, createWeekdaysRule, createWeeklyRule, createMonthlyRule, parseRuleToPreset, getRecurrenceFrequencyPriority } from '@/lib/rrule-utils'
 import { RecurrenceDialog, configToReadable, parseRruleToConfig, RecurrenceConfig } from '@/components/recurrence-dialog'
 
@@ -10,6 +10,7 @@ interface Employee {
   id: string
   name: string
   role: Role
+  workDays: number[]
 }
 
 interface Task {
@@ -17,25 +18,18 @@ interface Task {
   title: string
   description: string | null
   category: Category
-  rrule: string
+  taskType: TaskType
+  rrule: string | null
+  dueDays: number | null
+  printedAt: string | null
   employeeId: string | null
   employee: Employee | null
   active: boolean
+  createdAt: string
 }
 
-interface SpecialTask {
-  id: string
-  title: string
-  description: string | null
-  category: Category
-  rrule: string
-  dueDays: number
-  employeeId: string | null
-  employee: Employee | null
-  active: boolean
-}
-
-type TabType = 'recurring' | 'special'
+type TabType = 'active' | 'archive'
+type TypeFilter = '' | 'RECURRING' | 'SPECIAL' | 'ONE_OFF'
 
 const CATEGORY_LABELS: Record<Category, string> = {
   LIMPEZA: 'Limpeza',
@@ -63,6 +57,18 @@ const CATEGORY_ICONS: Record<Category, string> = {
   OUTRO: '📋',
 }
 
+const TYPE_LABELS: Record<TaskType, string> = {
+  RECURRING: 'Recorrente',
+  SPECIAL: 'Especial',
+  ONE_OFF: 'Avulsa',
+}
+
+const TYPE_ICONS: Record<TaskType, string> = {
+  RECURRING: '🔄',
+  SPECIAL: '⭐',
+  ONE_OFF: '📌',
+}
+
 // Logical category ordering: cleaning domain → food domain → home domain → care domain → other
 const CATEGORY_ORDER: Category[] = [
   'LIMPEZA', 'LAVANDERIA', 'ORGANIZACAO',  // Cleaning domain
@@ -87,16 +93,16 @@ const CATEGORY_COLORS: Record<Category, { border: string; bg: string; text: stri
 }
 
 export default function TasksPage() {
-  const [activeTab, setActiveTab] = useState<TabType>('recurring')
+  const [activeTab, setActiveTab] = useState<TabType>('active')
   const [tasks, setTasks] = useState<Task[]>([])
-  const [specialTasks, setSpecialTasks] = useState<SpecialTask[]>([])
+  const [archivedTasks, setArchivedTasks] = useState<Task[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
-  const [editingSpecialTask, setEditingSpecialTask] = useState<SpecialTask | null>(null)
   const [showInactive, setShowInactive] = useState(false)
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('')
   const [categoryFilter, setCategoryFilter] = useState<Category | ''>('')
   const [collapsedCategories, setCollapsedCategories] = useState<Set<Category>>(new Set())
   const [employeeFilter, setEmployeeFilter] = useState<string>('')
@@ -105,28 +111,32 @@ export default function TasksPage() {
   const fetchTasks = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await fetch('/api/tasks')
+      // Fetch active tasks (including pending ONE_OFF)
+      const params = new URLSearchParams()
+      if (showInactive) params.set('includeInactive', 'true')
+      const res = await fetch(`/api/tasks?${params}`)
       if (!res.ok) throw new Error('Erro ao carregar tarefas')
       const data = await res.json()
-      setTasks(data)
+
+      // Split into active and archived (printed ONE_OFF)
+      const active: Task[] = []
+      const archived: Task[] = []
+
+      for (const task of data) {
+        if (task.taskType === 'ONE_OFF' && task.printedAt) {
+          archived.push(task)
+        } else {
+          active.push(task)
+        }
+      }
+
+      setTasks(active)
+      setArchivedTasks(archived)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro desconhecido')
     } finally {
       setLoading(false)
-    }
-  }, [])
-
-  const fetchSpecialTasks = useCallback(async () => {
-    try {
-      const params = new URLSearchParams()
-      if (showInactive) params.set('includeInactive', 'true')
-      const res = await fetch(`/api/special-tasks?${params}`)
-      if (!res.ok) throw new Error('Erro ao carregar tarefas especiais')
-      const data = await res.json()
-      setSpecialTasks(data)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro desconhecido')
     }
   }, [showInactive])
 
@@ -144,25 +154,33 @@ export default function TasksPage() {
 
   useEffect(() => {
     fetchTasks()
-    fetchSpecialTasks()
     fetchEmployees()
-  }, [fetchTasks, fetchSpecialTasks, fetchEmployees])
+  }, [fetchTasks, fetchEmployees])
+
+  // Also fetch archived tasks when tab changes
+  useEffect(() => {
+    if (activeTab === 'archive') {
+      const fetchArchived = async () => {
+        try {
+          const res = await fetch('/api/tasks?type=ONE_OFF&includePrinted=true&includeInactive=true')
+          if (!res.ok) throw new Error('Erro ao carregar arquivo')
+          const data = await res.json()
+          setArchivedTasks(data.filter((t: Task) => t.printedAt))
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Erro desconhecido')
+        }
+      }
+      fetchArchived()
+    }
+  }, [activeTab])
 
   const handleAdd = () => {
     setEditingTask(null)
-    setEditingSpecialTask(null)
     setIsModalOpen(true)
   }
 
   const handleEditTask = (task: Task) => {
     setEditingTask(task)
-    setEditingSpecialTask(null)
-    setIsModalOpen(true)
-  }
-
-  const handleEditSpecialTask = (task: SpecialTask) => {
-    setEditingTask(null)
-    setEditingSpecialTask(task)
     setIsModalOpen(true)
   }
 
@@ -180,62 +198,67 @@ export default function TasksPage() {
     }
   }
 
-  const handleToggleSpecialTaskActive = async (task: SpecialTask) => {
+  const handleDeleteTask = async (task: Task) => {
+    if (!confirm('Tem certeza que deseja excluir esta tarefa?')) return
     try {
-      const res = await fetch(`/api/special-tasks/${task.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ active: !task.active }),
-      })
-      if (!res.ok) throw new Error('Erro ao atualizar tarefa')
-      await fetchSpecialTasks()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao atualizar')
-    }
-  }
-
-  const handleDeleteSpecialTask = async (task: SpecialTask) => {
-    if (!confirm('Tem certeza que deseja excluir esta tarefa especial?')) return
-    try {
-      const res = await fetch(`/api/special-tasks/${task.id}`, {
+      const res = await fetch(`/api/tasks/${task.id}`, {
         method: 'DELETE',
       })
       if (!res.ok) throw new Error('Erro ao excluir tarefa')
-      await fetchSpecialTasks()
+      await fetchTasks()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao excluir')
     }
   }
 
+  const handleResetPrinted = async (task: Task) => {
+    try {
+      const res = await fetch(`/api/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resetPrinted: true }),
+      })
+      if (!res.ok) throw new Error('Erro ao reimprimir tarefa')
+      await fetchTasks()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao reimprimir')
+    }
+  }
+
   const handleFormSubmit = async () => {
     await fetchTasks()
-    await fetchSpecialTasks()
     setIsModalOpen(false)
   }
 
   const filteredTasks = tasks.filter((task) => {
     if (!showInactive && !task.active) return false
+    if (typeFilter && task.taskType !== typeFilter) return false
     if (categoryFilter && task.category !== categoryFilter) return false
     if (employeeFilter && task.employeeId !== employeeFilter) return false
     if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
   })
 
-  const filteredSpecialTasks = specialTasks.filter((task) => {
-    if (!showInactive && !task.active) return false
+  const filteredArchivedTasks = archivedTasks.filter((task) => {
     if (categoryFilter && task.category !== categoryFilter) return false
     if (employeeFilter && task.employeeId !== employeeFilter) return false
     if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
   })
 
-  // Group tasks by category, sorted by frequency within each category
+  const pendingOneOffCount = tasks.filter((t) => t.taskType === 'ONE_OFF' && t.active && !t.printedAt).length
+  const activeCount = filteredTasks.length
+  const archiveCount = filteredArchivedTasks.length
+
+  // Group tasks by category
   const groupedTasks = useMemo(() => {
-    // First, sort all filtered tasks by frequency, then alphabetically
+    // Sort by frequency (for recurring tasks), then alphabetically
     const sorted = [...filteredTasks].sort((a, b) => {
-      const freqA = getRecurrenceFrequencyPriority(a.rrule)
-      const freqB = getRecurrenceFrequencyPriority(b.rrule)
-      if (freqA !== freqB) return freqA - freqB
+      if (a.rrule && b.rrule) {
+        const freqA = getRecurrenceFrequencyPriority(a.rrule)
+        const freqB = getRecurrenceFrequencyPriority(b.rrule)
+        if (freqA !== freqB) return freqA - freqB
+      }
       return a.title.localeCompare(b.title, 'pt-BR')
     })
 
@@ -252,28 +275,21 @@ export default function TasksPage() {
       .map(cat => ({ category: cat, tasks: groups.get(cat)! }))
   }, [filteredTasks])
 
-  // Group special tasks by category
-  const groupedSpecialTasks = useMemo(() => {
-    // Sort by frequency, then alphabetically
-    const sorted = [...filteredSpecialTasks].sort((a, b) => {
-      const freqA = getRecurrenceFrequencyPriority(a.rrule)
-      const freqB = getRecurrenceFrequencyPriority(b.rrule)
-      if (freqA !== freqB) return freqA - freqB
-      return a.title.localeCompare(b.title, 'pt-BR')
-    })
+  const getTaskSecondaryInfo = (task: Task): string => {
+    const parts: string[] = []
+    parts.push(task.employee?.name || 'Sem atrib.')
 
-    // Group by category
-    const groups = new Map<Category, SpecialTask[]>()
-    for (const task of sorted) {
-      const existing = groups.get(task.category) || []
-      groups.set(task.category, [...existing, task])
+    if (task.taskType === 'ONE_OFF') {
+      parts.push(`${task.dueDays || 7}d`)
+    } else if (task.taskType === 'SPECIAL') {
+      parts.push(`${task.dueDays || 7}d`)
+      if (task.rrule) parts.push(rruleToReadable(task.rrule))
+    } else if (task.rrule) {
+      parts.push(rruleToReadable(task.rrule))
     }
 
-    // Return in CATEGORY_ORDER, filtering empty categories
-    return CATEGORY_ORDER
-      .filter(cat => groups.has(cat))
-      .map(cat => ({ category: cat, tasks: groups.get(cat)! }))
-  }, [filteredSpecialTasks])
+    return parts.join(' · ')
+  }
 
   return (
     <div className="space-y-4">
@@ -291,29 +307,47 @@ export default function TasksPage() {
       {/* Tabs */}
       <div className="flex border-b border-[var(--border)]">
         <button
-          onClick={() => setActiveTab('recurring')}
+          onClick={() => setActiveTab('active')}
           className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
-            activeTab === 'recurring'
+            activeTab === 'active'
               ? 'border-[var(--primary)] text-[var(--primary)]'
               : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
           }`}
         >
-          Recorrentes ({tasks.filter(t => showInactive || t.active).length})
+          Ativas ({activeCount})
+          {pendingOneOffCount > 0 && (
+            <span className="ml-1.5 px-1.5 py-0.5 text-xs rounded-full bg-orange-500 text-white">
+              {pendingOneOffCount}
+            </span>
+          )}
         </button>
         <button
-          onClick={() => setActiveTab('special')}
+          onClick={() => setActiveTab('archive')}
           className={`px-4 py-2 font-medium text-sm border-b-2 transition-colors ${
-            activeTab === 'special'
+            activeTab === 'archive'
               ? 'border-[var(--primary)] text-[var(--primary)]'
               : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
           }`}
         >
-          Especiais ({filteredSpecialTasks.length})
+          Arquivo ({archiveCount})
         </button>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
+        {activeTab === 'active' && (
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
+            className="h-9 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)] text-sm"
+          >
+            <option value="">Todos os tipos</option>
+            <option value="RECURRING">🔄 Recorrentes</option>
+            <option value="SPECIAL">⭐ Especiais</option>
+            <option value="ONE_OFF">📌 Avulsas</option>
+          </select>
+        )}
+
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value as Category | '')}
@@ -347,19 +381,21 @@ export default function TasksPage() {
           className="h-9 w-40"
         />
 
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={showInactive}
-            onChange={(e) => setShowInactive(e.target.checked)}
-            className="w-4 h-4"
-          />
-          Mostrar inativas
-        </label>
+        {activeTab === 'active' && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+              className="w-4 h-4"
+            />
+            Mostrar inativas
+          </label>
+        )}
       </div>
 
-      {/* Recurring Tasks Tab */}
-      {activeTab === 'recurring' && (
+      {/* Active Tasks Tab */}
+      {activeTab === 'active' && (
         <>
           {loading ? (
             <div className="text-center py-8 text-[var(--muted-foreground)]">Carregando...</div>
@@ -368,7 +404,7 @@ export default function TasksPage() {
               <CardContent className="py-8 text-center">
                 <p className="text-[var(--muted-foreground)]">
                   {tasks.length === 0
-                    ? 'Nenhuma tarefa recorrente cadastrada ainda.'
+                    ? 'Nenhuma tarefa cadastrada ainda.'
                     : 'Nenhuma tarefa encontrada com os filtros selecionados.'}
                 </p>
                 {tasks.length === 0 && (
@@ -424,19 +460,27 @@ export default function TasksPage() {
                               flex items-center gap-2 px-4 py-2.5
                               hover:bg-[var(--secondary)] transition-colors
                               ${!task.active ? 'opacity-50' : ''}
+                              ${task.taskType === 'ONE_OFF' && !task.printedAt ? 'bg-orange-50/50 dark:bg-orange-950/20' : ''}
                             `}
                           >
                             <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                              <span className="text-xs" title={TYPE_LABELS[task.taskType]}>
+                                {TYPE_ICONS[task.taskType]}
+                              </span>
                               <span className="font-medium truncate">{task.title}</span>
                               <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
-                                · {task.employee?.name || 'Sem atrib.'} · {rruleToReadable(task.rrule)}
+                                · {getTaskSecondaryInfo(task)}
                               </span>
+                              {task.taskType === 'ONE_OFF' && !task.printedAt && (
+                                <Badge className="text-xs px-1.5 py-0 bg-orange-500 text-white">Pendente</Badge>
+                              )}
                               {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
                             </div>
                             <DropdownMenu
                               items={[
                                 { label: 'Editar', onClick: () => handleEditTask(task) },
                                 { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleActive(task) },
+                                { label: 'Excluir', onClick: () => handleDeleteTask(task), variant: 'destructive' },
                               ]}
                             />
                           </div>
@@ -451,97 +495,55 @@ export default function TasksPage() {
         </>
       )}
 
-      {/* Special Tasks Tab */}
-      {activeTab === 'special' && (
+      {/* Archive Tab */}
+      {activeTab === 'archive' && (
         <>
           <p className="text-sm text-[var(--muted-foreground)]">
-            Tarefas com prazo para conclusão. Quando aparecem na agenda, têm um número de dias para serem concluídas.
+            Tarefas avulsas já impressas. Use &quot;Reimprimir&quot; para colocá-las novamente na fila de impressão.
           </p>
 
-          {filteredSpecialTasks.length === 0 ? (
+          {filteredArchivedTasks.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-center">
                 <p className="text-[var(--muted-foreground)]">
-                  {specialTasks.length === 0
-                    ? 'Nenhuma tarefa especial cadastrada ainda.'
-                    : 'Nenhuma tarefa encontrada com os filtros selecionados.'}
+                  Nenhuma tarefa arquivada.
                 </p>
-                {specialTasks.length === 0 && (
-                  <Button onClick={handleAdd} className="mt-4">
-                    Cadastrar primeira tarefa especial
-                  </Button>
-                )}
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-4">
-              {groupedSpecialTasks.map(({ category, tasks: categoryTasks }) => {
-                const colors = CATEGORY_COLORS[category]
-                const isCollapsed = collapsedCategories.has(category)
-                return (
-                  <Card key={category} className={`overflow-hidden border-l-4 ${colors.border}`}>
-                    {/* Category Header - Clickable */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCollapsedCategories(prev => {
-                          const next = new Set(prev)
-                          if (next.has(category)) {
-                            next.delete(category)
-                          } else {
-                            next.add(category)
-                          }
-                          return next
-                        })
-                      }}
-                      className={`w-full px-4 py-2.5 ${colors.bg} ${!isCollapsed ? 'border-b border-[var(--border)]' : ''} hover:opacity-80 transition-opacity`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-sm transition-transform ${isCollapsed ? '' : 'rotate-90'}`}>▶</span>
-                          <span className="text-lg">{CATEGORY_ICONS[category]}</span>
-                          <span className={`font-semibold ${colors.text}`}>
-                            {CATEGORY_LABELS[category]}
-                          </span>
-                        </div>
-                        <span className={`text-sm ${colors.text} opacity-75`}>
-                          ({categoryTasks.length})
+            <div className="space-y-2">
+              {filteredArchivedTasks.map((task) => (
+                <Card
+                  key={task.id}
+                  className="border-l-4 border-l-green-500 bg-green-50 dark:bg-green-950/20"
+                >
+                  <CardContent className="py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                        <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
+                        <span className="font-medium truncate">{task.title}</span>
+                        <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
+                          · {task.employee?.name || 'Sem atrib.'} · {task.dueDays || 7}d
                         </span>
+                        <Badge variant="success" className="text-xs px-1.5 py-0">
+                          Impresso {task.printedAt && new Date(task.printedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                        </Badge>
                       </div>
-                    </button>
-                    {/* Tasks List - Collapsible */}
-                    {!isCollapsed && (
-                      <div className="divide-y divide-[var(--border)]">
-                        {categoryTasks.map((task) => (
-                          <div
-                            key={task.id}
-                            className={`
-                              flex items-center gap-2 px-4 py-2.5
-                              hover:bg-[var(--secondary)] transition-colors
-                              ${!task.active ? 'opacity-50' : ''}
-                            `}
-                          >
-                            <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                              <span className="font-medium truncate">{task.title}</span>
-                              <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
-                                · {task.employee?.name || 'Sem atrib.'} · {task.dueDays}d
-                              </span>
-                              {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
-                            </div>
-                            <DropdownMenu
-                              items={[
-                                { label: 'Editar', onClick: () => handleEditSpecialTask(task) },
-                                { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleSpecialTaskActive(task) },
-                                { label: 'Excluir', onClick: () => handleDeleteSpecialTask(task), variant: 'destructive' },
-                              ]}
-                            />
-                          </div>
-                        ))}
-                      </div>
+                      <DropdownMenu
+                        items={[
+                          { label: 'Reimprimir', onClick: () => handleResetPrinted(task) },
+                          { label: 'Excluir', onClick: () => handleDeleteTask(task), variant: 'destructive' },
+                        ]}
+                      />
+                    </div>
+                    {task.description && (
+                      <p className="text-sm text-[var(--muted-foreground)] mt-1 ml-7">
+                        {task.description}
+                      </p>
                     )}
-                  </Card>
-                )
-              })}
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
         </>
@@ -550,13 +552,12 @@ export default function TasksPage() {
       <Modal
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingTask ? 'Editar Tarefa' : editingSpecialTask ? 'Editar Tarefa Especial' : 'Nova Tarefa'}
+        title={editingTask ? 'Editar Tarefa' : 'Nova Tarefa'}
       >
         <TaskForm
           task={editingTask}
-          specialTask={editingSpecialTask}
           employees={employees}
-          defaultTab={activeTab}
+          defaultType={typeFilter || undefined}
           onSuccess={handleFormSubmit}
           onCancel={() => setIsModalOpen(false)}
         />
@@ -567,9 +568,8 @@ export default function TasksPage() {
 
 interface TaskFormProps {
   task: Task | null
-  specialTask: SpecialTask | null
   employees: Employee[]
-  defaultTab: TabType
+  defaultType?: TaskType
   onSuccess: () => void
   onCancel: () => void
 }
@@ -578,36 +578,32 @@ type RecurrenceType = 'daily' | 'weekdays' | 'weekly' | 'monthly' | 'custom'
 
 const DAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
-function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCancel }: TaskFormProps) {
-  // Determine initial task type based on what's being edited
-  const initialIsSpecial = specialTask !== null || (task === null && specialTask === null && defaultTab === 'special')
-
-  const [isSpecial, setIsSpecial] = useState(initialIsSpecial)
-  const [title, setTitle] = useState(task?.title ?? specialTask?.title ?? '')
-  const [description, setDescription] = useState(task?.description ?? specialTask?.description ?? '')
-  const [category, setCategory] = useState<Category>(task?.category ?? specialTask?.category ?? 'LIMPEZA')
-  const [employeeId, setEmployeeId] = useState(task?.employeeId ?? specialTask?.employeeId ?? '')
-  const [active, setActive] = useState(task?.active ?? specialTask?.active ?? true)
+function TaskForm({ task, employees, defaultType, onSuccess, onCancel }: TaskFormProps) {
+  const [taskType, setTaskType] = useState<TaskType>(task?.taskType ?? defaultType ?? 'RECURRING')
+  const [title, setTitle] = useState(task?.title ?? '')
+  const [description, setDescription] = useState(task?.description ?? '')
+  const [category, setCategory] = useState<Category>(task?.category ?? 'LIMPEZA')
+  const [employeeId, setEmployeeId] = useState(task?.employeeId ?? '')
+  const [active, setActive] = useState(task?.active ?? true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Recurrence state (for both regular and special tasks now)
-  const rruleSource = task?.rrule ?? specialTask?.rrule
-  const parsed = rruleSource ? parseRuleToPreset(rruleSource) : { type: 'daily' as RecurrenceType }
+  // Recurrence state
+  const parsed = task?.rrule ? parseRuleToPreset(task.rrule) : { type: 'daily' as RecurrenceType }
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>(parsed.type)
   const [weeklyDays, setWeeklyDays] = useState<number[]>(parsed.days ?? [0, 1, 2, 3, 4])
   const [monthDay, setMonthDay] = useState(parsed.monthDay ?? 1)
-  const [customRrule, setCustomRrule] = useState(parsed.type === 'custom' ? rruleSource ?? '' : '')
+  const [customRrule, setCustomRrule] = useState(parsed.type === 'custom' ? task?.rrule ?? '' : '')
   const [showRecurrenceDialog, setShowRecurrenceDialog] = useState(false)
   const [customConfig, setCustomConfig] = useState<RecurrenceConfig | null>(
-    parsed.type === 'custom' && rruleSource ? parseRruleToConfig(rruleSource) : null
+    parsed.type === 'custom' && task?.rrule ? parseRruleToConfig(task.rrule) : null
   )
 
-  // Special task state
-  const [dueDays, setDueDays] = useState(specialTask?.dueDays ?? 7)
+  // Due days (for SPECIAL and ONE_OFF)
+  const [dueDays, setDueDays] = useState(task?.dueDays ?? 7)
 
   // Disable type switching when editing
-  const isEditing = task !== null || specialTask !== null
+  const isEditing = task !== null
 
   const getRrule = (): string => {
     switch (recurrenceType) {
@@ -632,53 +628,37 @@ function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCance
     setError(null)
 
     try {
-      const rrule = getRrule()
+      const url = task ? `/api/tasks/${task.id}` : '/api/tasks'
+      const method = task ? 'PUT' : 'POST'
 
-      if (isSpecial) {
-        // Create/update special task
-        const url = specialTask ? `/api/special-tasks/${specialTask.id}` : '/api/special-tasks'
-        const method = specialTask ? 'PUT' : 'POST'
+      const body: Record<string, unknown> = {
+        title,
+        description: description || null,
+        category,
+        employeeId: employeeId || null,
+        taskType,
+        active,
+      }
 
-        const res = await fetch(url, {
-          method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title,
-            description: description || null,
-            category,
-            employeeId: employeeId || null,
-            rrule,
-            dueDays,
-            active,
-          }),
-        })
+      // Add rrule for RECURRING and SPECIAL
+      if (taskType === 'RECURRING' || taskType === 'SPECIAL') {
+        body.rrule = getRrule()
+      }
 
-        if (!res.ok) {
-          const data = await res.json()
-          throw new Error(data.error || 'Erro ao salvar')
-        }
-      } else {
-        // Create/update recurring task
-        const url = task ? `/api/tasks/${task.id}` : '/api/tasks'
-        const method = task ? 'PUT' : 'POST'
+      // Add dueDays for SPECIAL and ONE_OFF
+      if (taskType === 'SPECIAL' || taskType === 'ONE_OFF') {
+        body.dueDays = dueDays
+      }
 
-        const res = await fetch(url, {
-          method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title,
-            description: description || null,
-            category,
-            employeeId: employeeId || null,
-            rrule,
-            active,
-          }),
-        })
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
 
-        if (!res.ok) {
-          const data = await res.json()
-          throw new Error(data.error || 'Erro ao salvar')
-        }
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Erro ao salvar')
       }
 
       onSuccess()
@@ -716,31 +696,44 @@ function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCance
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setIsSpecial(false)}
-              className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                !isSpecial
+              onClick={() => setTaskType('RECURRING')}
+              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                taskType === 'RECURRING'
                   ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
                   : 'bg-[var(--secondary)] text-[var(--secondary-foreground)]'
               }`}
             >
-              Recorrente
+              🔄 Recorrente
             </button>
             <button
               type="button"
-              onClick={() => setIsSpecial(true)}
-              className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isSpecial
+              onClick={() => setTaskType('SPECIAL')}
+              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                taskType === 'SPECIAL'
                   ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
                   : 'bg-[var(--secondary)] text-[var(--secondary-foreground)]'
               }`}
             >
-              Especial (com prazo)
+              ⭐ Especial
+            </button>
+            <button
+              type="button"
+              onClick={() => setTaskType('ONE_OFF')}
+              className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                taskType === 'ONE_OFF'
+                  ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+                  : 'bg-[var(--secondary)] text-[var(--secondary-foreground)]'
+              }`}
+            >
+              📌 Avulsa
             </button>
           </div>
           <p className="text-xs text-[var(--muted-foreground)] mt-1">
-            {isSpecial
-              ? 'Tarefa com prazo para conclusão. Quando aparece na agenda, tem X dias para ser concluída.'
-              : 'Tarefa que deve ser concluída no mesmo dia em que aparece.'}
+            {taskType === 'RECURRING'
+              ? 'Tarefa que se repete conforme agendamento.'
+              : taskType === 'SPECIAL'
+              ? 'Tarefa agendada com prazo para conclusão.'
+              : 'Tarefa única que aparece na próxima impressão.'}
           </p>
         </div>
       )}
@@ -750,7 +743,7 @@ function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCance
         <Input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder={isSpecial ? 'Ex: Limpar filtros do ar-condicionado' : 'Ex: Limpar cozinha'}
+          placeholder={taskType === 'ONE_OFF' ? 'Ex: Desfazer malas da viagem' : taskType === 'SPECIAL' ? 'Ex: Limpar filtros do ar-condicionado' : 'Ex: Limpar cozinha'}
           required
           maxLength={100}
         />
@@ -799,137 +792,139 @@ function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCance
         </select>
       </div>
 
-      {/* Recurrence (for both task types) */}
-      <div>
-        <label className="block text-sm font-medium mb-2">
-          {isSpecial ? 'Quando aparece na agenda *' : 'Recorrência *'}
-        </label>
-        <div className="space-y-2">
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="recurrence"
-              checked={recurrenceType === 'daily'}
-              onChange={() => setRecurrenceType('daily')}
-            />
-            <span>Diariamente</span>
+      {/* Recurrence (for RECURRING and SPECIAL tasks) */}
+      {(taskType === 'RECURRING' || taskType === 'SPECIAL') && (
+        <div>
+          <label className="block text-sm font-medium mb-2">
+            {taskType === 'SPECIAL' ? 'Quando aparece na agenda *' : 'Recorrência *'}
           </label>
+          <div className="space-y-2">
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="recurrence"
+                checked={recurrenceType === 'daily'}
+                onChange={() => setRecurrenceType('daily')}
+              />
+              <span>Diariamente</span>
+            </label>
 
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="recurrence"
-              checked={recurrenceType === 'weekdays'}
-              onChange={() => setRecurrenceType('weekdays')}
-            />
-            <span>Dias úteis (Seg-Sex)</span>
-          </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="recurrence"
+                checked={recurrenceType === 'weekdays'}
+                onChange={() => setRecurrenceType('weekdays')}
+              />
+              <span>Dias úteis (Seg-Sex)</span>
+            </label>
 
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="recurrence"
-              checked={recurrenceType === 'weekly'}
-              onChange={() => setRecurrenceType('weekly')}
-            />
-            <span>Dias específicos</span>
-          </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="recurrence"
+                checked={recurrenceType === 'weekly'}
+                onChange={() => setRecurrenceType('weekly')}
+              />
+              <span>Dias específicos</span>
+            </label>
 
-          {recurrenceType === 'weekly' && (
-            <div className="flex gap-1 flex-wrap ml-6">
-              {DAY_LABELS.map((label, index) => (
-                <button
-                  key={index}
+            {recurrenceType === 'weekly' && (
+              <div className="flex gap-1 flex-wrap ml-6">
+                {DAY_LABELS.map((label, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => toggleWeeklyDay(index)}
+                    className={`
+                      px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                      ${
+                        weeklyDays.includes(index)
+                          ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+                          : 'bg-[var(--secondary)] text-[var(--secondary-foreground)]'
+                      }
+                    `}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="recurrence"
+                checked={recurrenceType === 'monthly'}
+                onChange={() => setRecurrenceType('monthly')}
+              />
+              <span>Mensal</span>
+            </label>
+
+            {recurrenceType === 'monthly' && (
+              <div className="ml-6">
+                <label className="text-sm">
+                  Dia do mês:{' '}
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={monthDay}
+                    onChange={(e) => setMonthDay(parseInt(e.target.value) || 1)}
+                    className="w-16 h-8 px-2 rounded border border-[var(--border)] bg-[var(--background)]"
+                  />
+                </label>
+              </div>
+            )}
+
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="recurrence"
+                checked={recurrenceType === 'custom'}
+                onChange={() => {
+                  if (!customRrule) {
+                    setShowRecurrenceDialog(true)
+                  } else {
+                    setRecurrenceType('custom')
+                  }
+                }}
+              />
+              <span>Personalizado...</span>
+            </label>
+
+            {recurrenceType === 'custom' && customConfig && (
+              <div className="ml-6 p-3 rounded-lg bg-[var(--secondary)] flex items-center justify-between gap-2">
+                <span className="text-sm">{configToReadable(customConfig)}</span>
+                <Button
                   type="button"
-                  onClick={() => toggleWeeklyDay(index)}
-                  className={`
-                    px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                    ${
-                      weeklyDays.includes(index)
-                        ? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
-                        : 'bg-[var(--secondary)] text-[var(--secondary-foreground)]'
-                    }
-                  `}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowRecurrenceDialog(true)}
                 >
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
+                  Editar
+                </Button>
+              </div>
+            )}
 
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="recurrence"
-              checked={recurrenceType === 'monthly'}
-              onChange={() => setRecurrenceType('monthly')}
-            />
-            <span>Mensal</span>
-          </label>
-
-          {recurrenceType === 'monthly' && (
-            <div className="ml-6">
-              <label className="text-sm">
-                Dia do mês:{' '}
-                <input
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={monthDay}
-                  onChange={(e) => setMonthDay(parseInt(e.target.value) || 1)}
-                  className="w-16 h-8 px-2 rounded border border-[var(--border)] bg-[var(--background)]"
-                />
-              </label>
-            </div>
-          )}
-
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="recurrence"
-              checked={recurrenceType === 'custom'}
-              onChange={() => {
-                if (!customRrule) {
-                  setShowRecurrenceDialog(true)
-                } else {
-                  setRecurrenceType('custom')
-                }
-              }}
-            />
-            <span>Personalizado...</span>
-          </label>
-
-          {recurrenceType === 'custom' && customConfig && (
-            <div className="ml-6 p-3 rounded-lg bg-[var(--secondary)] flex items-center justify-between gap-2">
-              <span className="text-sm">{configToReadable(customConfig)}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowRecurrenceDialog(true)}
-              >
-                Editar
-              </Button>
-            </div>
-          )}
-
-          {recurrenceType === 'custom' && !customConfig && (
-            <div className="ml-6">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowRecurrenceDialog(true)}
-              >
-                Configurar recorrência
-              </Button>
-            </div>
-          )}
+            {recurrenceType === 'custom' && !customConfig && (
+              <div className="ml-6">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setShowRecurrenceDialog(true)}
+                >
+                  Configurar recorrência
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Special task: Due Days */}
-      {isSpecial && (
+      {/* Due Days (for SPECIAL and ONE_OFF) */}
+      {(taskType === 'SPECIAL' || taskType === 'ONE_OFF') && (
         <div>
           <label className="block text-sm font-medium mb-1">Prazo para conclusão (dias) *</label>
           <input
@@ -941,7 +936,9 @@ function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCance
             className="w-24 h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
           />
           <p className="text-xs text-[var(--muted-foreground)] mt-1">
-            Quando a tarefa aparece na agenda, terá {dueDays} dia{dueDays > 1 ? 's' : ''} para ser concluída.
+            {taskType === 'ONE_OFF'
+              ? `A tarefa terá ${dueDays} dia${dueDays > 1 ? 's' : ''} para ser concluída após a impressão.`
+              : `Quando a tarefa aparece na agenda, terá ${dueDays} dia${dueDays > 1 ? 's' : ''} para ser concluída.`}
           </p>
         </div>
       )}
@@ -967,7 +964,7 @@ function TaskForm({ task, specialTask, employees, defaultTab, onSuccess, onCance
           Cancelar
         </Button>
         <Button type="submit" disabled={submitting}>
-          {submitting ? 'Salvando...' : (task || specialTask) ? 'Salvar' : 'Criar'}
+          {submitting ? 'Salvando...' : task ? 'Salvar' : 'Criar'}
         </Button>
       </div>
 
