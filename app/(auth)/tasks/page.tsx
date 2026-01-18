@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Button, Card, CardContent, Badge, Modal, Input } from '@/components/ui'
+import { Button, Card, CardContent, Badge, Modal, Input, DropdownMenu } from '@/components/ui'
 import { Category, Role } from '@prisma/client'
 import { rruleToReadable, createDailyRule, createWeekdaysRule, createWeeklyRule, createMonthlyRule, parseRuleToPreset } from '@/lib/rrule-utils'
 import { RecurrenceDialog, configToReadable, parseRruleToConfig, RecurrenceConfig } from '@/components/recurrence-dialog'
@@ -309,33 +309,37 @@ export default function TasksPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
-              {filteredTasks.map((task) => (
-                <Card key={task.id} className={!task.active ? 'opacity-60' : ''}>
-                  <CardContent className="flex items-center justify-between py-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
-                        <span className="font-medium truncate">{task.title}</span>
-                        {!task.active && <Badge variant="warning">Inativa</Badge>}
-                      </div>
-                      <div className="text-sm text-[var(--muted-foreground)] mt-1">
-                        {task.employee ? task.employee.name : 'Sem atribuição'} •{' '}
-                        {rruleToReadable(task.rrule)}
-                      </div>
+            <Card>
+              <div className="divide-y divide-[var(--border)] md:grid md:grid-cols-2 md:divide-y-0">
+                {filteredTasks.map((task, index) => (
+                  <div
+                    key={task.id}
+                    className={`
+                      flex items-center gap-2 px-3 py-2.5
+                      hover:bg-[var(--secondary)] transition-colors
+                      ${!task.active ? 'opacity-50' : ''}
+                      ${index % 2 === 1 ? 'md:border-l md:border-[var(--border)]' : ''}
+                      ${index >= 2 ? 'md:border-t md:border-[var(--border)]' : ''}
+                    `}
+                  >
+                    <span className="text-base flex-shrink-0">{CATEGORY_ICONS[task.category]}</span>
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                      <span className="font-medium truncate">{task.title}</span>
+                      <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
+                        · {task.employee?.name || 'Sem atrib.'} · {rruleToReadable(task.rrule)}
+                      </span>
+                      {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
                     </div>
-                    <div className="flex gap-2 ml-4">
-                      <Button variant="ghost" size="sm" onClick={() => handleEditTask(task)}>
-                        Editar
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleToggleActive(task)}>
-                        {task.active ? 'Desativar' : 'Ativar'}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    <DropdownMenu
+                      items={[
+                        { label: 'Editar', onClick: () => handleEditTask(task) },
+                        { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleActive(task) },
+                      ]}
+                    />
+                  </div>
+                ))}
+              </div>
+            </Card>
           )}
         </>
       )}
@@ -363,41 +367,38 @@ export default function TasksPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="space-y-3">
-              {filteredSpecialTasks.map((task) => (
-                <Card key={task.id} className={!task.active ? 'opacity-60' : ''}>
-                  <CardContent className="flex items-center justify-between py-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
-                        <span className="font-medium">{task.title}</span>
-                        {!task.active && <Badge variant="warning">Inativa</Badge>}
-                      </div>
-                      <div className="text-sm text-[var(--muted-foreground)] mt-1">
-                        {task.employee ? task.employee.name : 'Sem atribuição'} •{' '}
-                        {rruleToReadable(task.rrule)} • Prazo: {task.dueDays} dias
-                      </div>
-                      {task.description && (
-                        <div className="text-sm text-[var(--muted-foreground)] mt-1 truncate">
-                          {task.description}
-                        </div>
-                      )}
+            <Card>
+              <div className="divide-y divide-[var(--border)] md:grid md:grid-cols-2 md:divide-y-0">
+                {filteredSpecialTasks.map((task, index) => (
+                  <div
+                    key={task.id}
+                    className={`
+                      flex items-center gap-2 px-3 py-2.5
+                      hover:bg-[var(--secondary)] transition-colors
+                      ${!task.active ? 'opacity-50' : ''}
+                      ${index % 2 === 1 ? 'md:border-l md:border-[var(--border)]' : ''}
+                      ${index >= 2 ? 'md:border-t md:border-[var(--border)]' : ''}
+                    `}
+                  >
+                    <span className="text-base flex-shrink-0">{CATEGORY_ICONS[task.category]}</span>
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                      <span className="font-medium truncate">{task.title}</span>
+                      <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
+                        · {task.employee?.name || 'Sem atrib.'} · {task.dueDays}d
+                      </span>
+                      {!task.active && <Badge variant="warning" className="text-xs px-1.5 py-0">Inativa</Badge>}
                     </div>
-                    <div className="flex gap-2 ml-4 flex-shrink-0">
-                      <Button variant="ghost" size="sm" onClick={() => handleEditSpecialTask(task)}>
-                        Editar
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleToggleSpecialTaskActive(task)}>
-                        {task.active ? 'Desativar' : 'Ativar'}
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => handleDeleteSpecialTask(task)}>
-                        Excluir
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    <DropdownMenu
+                      items={[
+                        { label: 'Editar', onClick: () => handleEditSpecialTask(task) },
+                        { label: task.active ? 'Desativar' : 'Ativar', onClick: () => handleToggleSpecialTaskActive(task) },
+                        { label: 'Excluir', onClick: () => handleDeleteSpecialTask(task), variant: 'destructive' },
+                      ]}
+                    />
+                  </div>
+                ))}
+              </div>
+            </Card>
           )}
         </>
       )}
