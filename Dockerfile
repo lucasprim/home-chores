@@ -16,6 +16,9 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY . .
 
+# Ensure public directory exists (Next.js standalone expects it)
+RUN mkdir -p public
+
 # Generate Prisma client
 RUN pnpm prisma generate
 
