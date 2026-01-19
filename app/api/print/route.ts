@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
         category: string
         dueDays: number
         dueDate: Date
+        employee: { name: string; role: string } | null
       }> = []
 
       if (includeSpecialTasks) {
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest) {
               category: task.category,
               dueDays: task.dueDays || 7,
               dueDate,
+              employee: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
             }
           })
       }
@@ -122,6 +124,7 @@ export async function POST(request: NextRequest) {
             category: task.category,
             dueDays: task.dueDays || 7,
             dueDate,
+            employee: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
           }
         })
 
@@ -219,6 +222,7 @@ export async function POST(request: NextRequest) {
             description: task.description,
             dueDate: task.dueDate,
             category: task.category,
+            employee: task.employee,
           },
         })
       }
@@ -232,6 +236,7 @@ export async function POST(request: NextRequest) {
             description: task.description,
             dueDate: task.dueDate,
             category: task.category,
+            employee: task.employee,
           },
         })
       }

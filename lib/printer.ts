@@ -270,6 +270,7 @@ export interface SpecialTaskItem {
   description?: string | null
   dueDate: Date
   category: string
+  employee?: { name: string; role: string } | null
 }
 
 export type PrintPage =
@@ -463,6 +464,14 @@ function formatSpecialTaskPage(
   }
 
   lines.push(COMMANDS.ALIGN_CENTER)
+  lines.push(COMMANDS.BOLD_ON)
+  if (task.employee) {
+    lines.push(`RESPONSAVEL: ${task.employee.name.toUpperCase()}\n`)
+  } else {
+    lines.push('RESPONSAVEL: NAO ATRIBUIDO\n')
+  }
+  lines.push(COMMANDS.BOLD_OFF)
+  lines.push('\n')
   lines.push(COMMANDS.BOLD_ON)
   lines.push(`VENCE: ${dueDateStr}\n`)
   lines.push(`(${daysLabel})\n`)

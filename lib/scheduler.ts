@@ -197,6 +197,7 @@ export async function executePrintJob(jobId: string): Promise<{
           return {
             ...task,
             dueDate,
+            employeeInfo: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
           }
         })
 
@@ -213,6 +214,7 @@ export async function executePrintJob(jobId: string): Promise<{
           return {
             ...task,
             dueDate,
+            employeeInfo: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
           }
         })
 
@@ -312,6 +314,7 @@ export async function executePrintJob(jobId: string): Promise<{
             description: task.description,
             dueDate: task.dueDate,
             category: task.category,
+            employee: task.employeeInfo,
           },
         })
       }
@@ -325,6 +328,7 @@ export async function executePrintJob(jobId: string): Promise<{
             description: task.description,
             dueDate: task.dueDate,
             category: task.category,
+            employee: task.employeeInfo,
           },
         })
       }

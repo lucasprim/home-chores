@@ -62,8 +62,7 @@ model Task {
   employee Employee? @relation(fields: [employeeId], references: [id])
 
   @@index([employeeId])
-  @@index([active])
-  @@index([taskType])
+  @@index([active, taskType])
   @@index([printedAt])
   @@map("tasks")
 }

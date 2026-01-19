@@ -108,6 +108,12 @@ export async function POST(request: NextRequest) {
       } catch {
         return NextResponse.json({ error: 'Recorrência inválida' }, { status: 400 })
       }
+
+      // For interval-based rules without explicit startDate, default to today
+      // This ensures "every N days" starts counting from creation, not from year 2000
+      if (!validatedStartDate && rrule.includes('INTERVAL=')) {
+        validatedStartDate = new Date()
+      }
     }
 
     if (type === TaskType.SPECIAL || type === TaskType.ONE_OFF) {

@@ -31,37 +31,40 @@ export async function GET(request: NextRequest) {
 
     const dayOfWeek = date.getDay() // 0=Sun, 1=Mon, ...
 
-    // Get all active tasks from the unified table
-    const allTasks = await prisma.task.findMany({
-      where: {
-        active: true,
-        ...(employeeId && { employeeId }),
-      },
-      include: {
-        employee: {
-          select: { id: true, name: true, role: true, workDays: true },
-        },
-      },
-    })
+    const employeeSelect = { id: true, name: true, role: true, workDays: true }
+    const baseWhere = { active: true, ...(employeeId && { employeeId }) }
+
+    // Run three queries in parallel - filtered by taskType at DB level
+    const [recurringTasksRaw, specialTasksRaw, oneOffTasksRaw] = await Promise.all([
+      prisma.task.findMany({
+        where: { ...baseWhere, taskType: TaskType.RECURRING },
+        include: { employee: { select: employeeSelect } },
+      }),
+      prisma.task.findMany({
+        where: { ...baseWhere, taskType: TaskType.SPECIAL },
+        include: { employee: { select: employeeSelect } },
+      }),
+      prisma.task.findMany({
+        where: { ...baseWhere, taskType: TaskType.ONE_OFF, printedAt: null },
+        include: { employee: { select: employeeSelect } },
+      }),
+    ])
 
     // Filter RECURRING tasks scheduled for this date
-    const recurringTasks = allTasks
-      .filter((task) => task.taskType === TaskType.RECURRING)
-      .filter((task) => {
-        // Check if task is scheduled for this date based on rrule (with startDate filtering)
-        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date, task.startDate)) {
-          return false
-        }
-        // Check if employee works on this day
-        if (task.employee && !task.employee.workDays.includes(dayOfWeek)) {
-          return false
-        }
-        return true
-      })
+    const recurringTasks = recurringTasksRaw.filter((task) => {
+      // Check if task is scheduled for this date based on rrule (with startDate filtering)
+      if (!task.rrule || !isTaskScheduledForDate(task.rrule, date, task.startDate)) {
+        return false
+      }
+      // Check if employee works on this day
+      if (task.employee && !task.employee.workDays.includes(dayOfWeek)) {
+        return false
+      }
+      return true
+    })
 
     // Filter SPECIAL tasks scheduled for this date
-    const specialTasks = allTasks
-      .filter((task) => task.taskType === TaskType.SPECIAL)
+    const specialTasks = specialTasksRaw
       .filter((task) => {
         // Check if task is scheduled for this date based on rrule (with startDate filtering)
         if (!task.rrule || !isTaskScheduledForDate(task.rrule, date, task.startDate)) {
@@ -84,9 +87,8 @@ export async function GET(request: NextRequest) {
         }
       })
 
-    // Filter ONE_OFF tasks (pending, not yet printed)
-    const oneOffTasks = allTasks
-      .filter((task) => task.taskType === TaskType.ONE_OFF && task.printedAt === null)
+    // Filter ONE_OFF tasks (already filtered for printedAt === null in query)
+    const oneOffTasks = oneOffTasksRaw
       .filter((task) => {
         // If employee is assigned, check if they work on this day
         if (task.employee && !task.employee.workDays.includes(dayOfWeek)) {

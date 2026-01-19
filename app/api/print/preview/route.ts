@@ -39,6 +39,7 @@ export type PreviewPage =
         dueDate: string
         daysRemaining: number
         category: string
+        employee: { name: string; role: string } | null
       }
     }
 
@@ -64,70 +65,79 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Data inválida' }, { status: 400 })
     }
 
-    // Get settings
-    const houseNameRecord = await prisma.settings.findUnique({ where: { key: 'house_name' } })
-    const houseName = houseNameRecord?.value ?? 'Minha Casa'
-
     if (type === 'DAILY_TASKS') {
       const dayOfWeek = date.getDay()
+      const dateStr = date.toISOString().split('T')[0]!
 
-      // Get all active tasks from the unified table
-      const allTasks = await prisma.task.findMany({
-        where: {
-          active: true,
-          ...(employeeId && { employeeId }),
-        },
-        include: {
-          employee: {
-            select: { id: true, name: true, role: true, workDays: true },
+      const employeeSelect = { id: true, name: true, role: true, workDays: true }
+      const baseWhere = { active: true, ...(employeeId && { employeeId }) }
+
+      // Run all queries in parallel - settings, tasks by type, and meals
+      const [
+        houseNameRecord,
+        recurringTasksRaw,
+        specialTasksRaw,
+        oneOffTasksRaw,
+        meals,
+      ] = await Promise.all([
+        prisma.settings.findUnique({ where: { key: 'house_name' } }),
+        prisma.task.findMany({
+          where: { ...baseWhere, taskType: TaskType.RECURRING },
+          include: { employee: { select: employeeSelect } },
+        }),
+        includeSpecialTasks
+          ? prisma.task.findMany({
+              where: { ...baseWhere, taskType: TaskType.SPECIAL },
+              include: { employee: { select: employeeSelect } },
+            })
+          : Promise.resolve([]),
+        prisma.task.findMany({
+          where: { ...baseWhere, taskType: TaskType.ONE_OFF, printedAt: null },
+          include: { employee: { select: employeeSelect } },
+        }),
+        prisma.mealSchedule.findMany({
+          where: {
+            date: {
+              gte: new Date(dateStr),
+              lt: new Date(new Date(dateStr).getTime() + 24 * 60 * 60 * 1000),
+            },
           },
-        },
-      })
+          select: { mealType: true, dish: { select: { name: true } } },
+        }),
+      ])
+
+      const houseName = houseNameRecord?.value ?? 'Minha Casa'
 
       // Filter RECURRING tasks scheduled for this date
-      const scheduledTasks = allTasks
-        .filter((task) => task.taskType === TaskType.RECURRING)
+      const scheduledTasks = recurringTasksRaw.filter((task) => {
+        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
+        if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
+        return true
+      })
+
+      // Filter SPECIAL tasks scheduled for this date
+      const scheduledSpecialTasks = specialTasksRaw
         .filter((task) => {
           if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
           if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
           return true
         })
+        .map((task) => {
+          const dueDate = new Date(date)
+          dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
+          return {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            category: task.category,
+            dueDays: task.dueDays || 7,
+            dueDate,
+            employee: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
+          }
+        })
 
-      // Get SPECIAL tasks scheduled for this date (if enabled)
-      let scheduledSpecialTasks: Array<{
-        id: string
-        title: string
-        description: string | null
-        category: string
-        dueDays: number
-        dueDate: Date
-      }> = []
-
-      if (includeSpecialTasks) {
-        scheduledSpecialTasks = allTasks
-          .filter((task) => task.taskType === TaskType.SPECIAL)
-          .filter((task) => {
-            if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
-            if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-            return true
-          })
-          .map((task) => {
-            const dueDate = new Date(date)
-            dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
-            return {
-              id: task.id,
-              title: task.title,
-              description: task.description,
-              category: task.category,
-              dueDays: task.dueDays || 7,
-              dueDate,
-            }
-          })
-      }
-
-      // Get pending ONE_OFF tasks (not printed yet, active)
-      const pendingOneOffTasks = allTasks
-        .filter((task) => task.taskType === TaskType.ONE_OFF && task.printedAt === null)
+      // Filter ONE_OFF tasks (already filtered for printedAt === null in query)
+      const pendingOneOffTasks = oneOffTasksRaw
         .filter((task) => {
           if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
           return true
@@ -142,20 +152,9 @@ export async function GET(request: NextRequest) {
             category: task.category,
             dueDays: task.dueDays || 7,
             dueDate,
+            employee: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
           }
         })
-
-      // Get meals for the date
-      const dateStr = date.toISOString().split('T')[0]!
-      const meals = await prisma.mealSchedule.findMany({
-        where: {
-          date: {
-            gte: new Date(dateStr),
-            lt: new Date(new Date(dateStr).getTime() + 24 * 60 * 60 * 1000),
-          },
-        },
-        include: { dish: { select: { name: true } } },
-      })
 
       const lunch = meals.find((m) => m.mealType === 'ALMOCO')?.dish.name
       const dinner = meals.find((m) => m.mealType === 'JANTAR')?.dish.name
@@ -245,6 +244,7 @@ export async function GET(request: NextRequest) {
             dueDate: taskDueDate.toLocaleDateString('pt-BR'),
             daysRemaining,
             category: task.category,
+            employee: task.employee,
           },
         })
       }
@@ -266,6 +266,7 @@ export async function GET(request: NextRequest) {
             dueDate: taskDueDate.toLocaleDateString('pt-BR'),
             daysRemaining,
             category: task.category,
+            employee: task.employee,
           },
         })
       }
@@ -299,19 +300,22 @@ export async function GET(request: NextRequest) {
       const weekEnd = new Date(weekStart)
       weekEnd.setDate(weekEnd.getDate() + 6)
 
-      // Get meal schedules for the week
-      const schedules = await prisma.mealSchedule.findMany({
-        where: {
-          date: {
-            gte: weekStart,
-            lte: weekEnd,
+      // Run queries in parallel
+      const [houseNameRecord, schedules] = await Promise.all([
+        prisma.settings.findUnique({ where: { key: 'house_name' } }),
+        prisma.mealSchedule.findMany({
+          where: {
+            date: {
+              gte: weekStart,
+              lte: weekEnd,
+            },
           },
-        },
-        include: {
-          dish: { select: { name: true } },
-        },
-        orderBy: { date: 'asc' },
-      })
+          select: { date: true, mealType: true, dish: { select: { name: true } } },
+          orderBy: { date: 'asc' },
+        }),
+      ])
+
+      const houseName = houseNameRecord?.value ?? 'Minha Casa'
 
       const days = []
       for (let i = 0; i < 7; i++) {
