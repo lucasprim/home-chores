@@ -309,7 +309,7 @@ export async function getTasksForWeek(dateStr: string): Promise<TasksForWeekResu
       orderBy: { name: 'asc' },
     }),
     prisma.task.findMany({
-      where: { active: true, taskType: TaskType.RECURRING },
+      where: { active: true, taskType: { in: [TaskType.RECURRING, TaskType.SPECIAL] } },
       select: {
         id: true,
         title: true,

@@ -140,6 +140,28 @@ export function isTaskScheduledForDate(rruleStr: string, date: Date, startDate?:
     }
 
     const normalizedRule = rruleStr.replace('RRULE:', '')
+    const dayOfWeek = date.getDay()
+
+    // Fast path for common presets - avoid RRule parsing entirely
+    if (normalizedRule === 'FREQ=DAILY') {
+      return true // Daily tasks run every day
+    }
+
+    if (normalizedRule === 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR') {
+      return dayOfWeek >= 1 && dayOfWeek <= 5 // Weekdays only
+    }
+
+    // Fast path for simple weekly rules with BYDAY
+    const weeklyMatch = normalizedRule.match(/^FREQ=WEEKLY;BYDAY=([A-Z,]+)$/)
+    if (weeklyMatch && weeklyMatch[1]) {
+      const dayMap: Record<string, number> = {
+        SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6,
+      }
+      const scheduledDays = weeklyMatch[1].split(',').map((d) => dayMap[d]).filter((d): d is number => d !== undefined)
+      return scheduledDays.includes(dayOfWeek)
+    }
+
+    // Fall back to full RRule parsing for complex rules
     const rule = RRule.fromString(normalizedRule)
 
     // Use startDate as dtstart for RRule calculation (if provided), otherwise use far past date
