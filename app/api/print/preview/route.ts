@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { TaskType } from '@prisma/client'
-import { isTaskScheduledForDate } from '@/lib/rrule-utils'
+import { getTasksForDate } from '@/lib/task-scheduler'
 
 const ROLE_LABELS: Record<string, string> = {
   FAXINEIRA: 'Faxineira',
@@ -55,46 +54,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Data é obrigatória' }, { status: 400 })
     }
 
-    // Parse date parts to avoid timezone issues (dateParam is "YYYY-MM-DD")
+    // Validate date format
     const [year, month, day] = dateParam.split('-').map(Number)
     if (!year || !month || !day) {
       return NextResponse.json({ error: 'Data inválida' }, { status: 400 })
     }
-    const date = new Date(year, month - 1, day, 12, 0, 0) // Use noon to avoid timezone edge cases
+    const date = new Date(year, month - 1, day, 12, 0, 0)
     if (isNaN(date.getTime())) {
       return NextResponse.json({ error: 'Data inválida' }, { status: 400 })
     }
 
     if (type === 'DAILY_TASKS') {
-      const dayOfWeek = date.getDay()
       const dateStr = date.toISOString().split('T')[0]!
 
-      const employeeSelect = { id: true, name: true, role: true, workDays: true }
-      const baseWhere = { active: true, ...(employeeId && { employeeId }) }
-
-      // Run all queries in parallel - settings, tasks by type, and meals
-      const [
-        houseNameRecord,
-        recurringTasksRaw,
-        specialTasksRaw,
-        oneOffTasksRaw,
-        meals,
-      ] = await Promise.all([
+      // Get tasks using unified engine and meals in parallel
+      const [taskResult, houseNameRecord, meals] = await Promise.all([
+        getTasksForDate(dateParam, {
+          employeeId: employeeId || undefined,
+          includeSpecialTasks,
+        }),
         prisma.settings.findUnique({ where: { key: 'house_name' } }),
-        prisma.task.findMany({
-          where: { ...baseWhere, taskType: TaskType.RECURRING },
-          include: { employee: { select: employeeSelect } },
-        }),
-        includeSpecialTasks
-          ? prisma.task.findMany({
-              where: { ...baseWhere, taskType: TaskType.SPECIAL },
-              include: { employee: { select: employeeSelect } },
-            })
-          : Promise.resolve([]),
-        prisma.task.findMany({
-          where: { ...baseWhere, taskType: TaskType.ONE_OFF, printedAt: null },
-          include: { employee: { select: employeeSelect } },
-        }),
         prisma.mealSchedule.findMany({
           where: {
             date: {
@@ -107,62 +86,13 @@ export async function GET(request: NextRequest) {
       ])
 
       const houseName = houseNameRecord?.value ?? 'Minha Casa'
-
-      // Filter RECURRING tasks scheduled for this date
-      const scheduledTasks = recurringTasksRaw.filter((task) => {
-        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
-        if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-        return true
-      })
-
-      // Filter SPECIAL tasks scheduled for this date
-      const scheduledSpecialTasks = specialTasksRaw
-        .filter((task) => {
-          if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
-          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-          return true
-        })
-        .map((task) => {
-          const dueDate = new Date(date)
-          dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
-          return {
-            id: task.id,
-            title: task.title,
-            description: task.description,
-            category: task.category,
-            dueDays: task.dueDays || 7,
-            dueDate,
-            employee: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
-          }
-        })
-
-      // Filter ONE_OFF tasks (already filtered for printedAt === null in query)
-      const pendingOneOffTasks = oneOffTasksRaw
-        .filter((task) => {
-          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-          return true
-        })
-        .map((task) => {
-          const dueDate = new Date(date)
-          dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
-          return {
-            id: task.id,
-            title: task.title,
-            description: task.description,
-            category: task.category,
-            dueDays: task.dueDays || 7,
-            dueDate,
-            employee: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
-          }
-        })
-
       const lunch = meals.find((m) => m.mealType === 'ALMOCO')?.dish.name
       const dinner = meals.find((m) => m.mealType === 'JANTAR')?.dish.name
 
       // Build pages array
       const pages: PreviewPage[] = []
 
-      // Group tasks by employee
+      // Group recurring tasks by employee
       const unassignedTasks: { title: string; description: string | null }[] = []
       const employeeGroups: Record<
         string,
@@ -173,7 +103,7 @@ export async function GET(request: NextRequest) {
         }
       > = {}
 
-      for (const task of scheduledTasks) {
+      for (const task of taskResult.tasks) {
         if (!task.employee) {
           unassignedTasks.push({
             title: task.title,
@@ -228,7 +158,7 @@ export async function GET(request: NextRequest) {
       const normalizedDate = new Date(date)
       normalizedDate.setHours(0, 0, 0, 0)
 
-      for (const task of scheduledSpecialTasks) {
+      for (const task of taskResult.specialTasks) {
         const taskDueDate = new Date(task.dueDate)
         taskDueDate.setHours(0, 0, 0, 0)
         const daysRemaining = Math.ceil(
@@ -244,13 +174,15 @@ export async function GET(request: NextRequest) {
             dueDate: taskDueDate.toLocaleDateString('pt-BR'),
             daysRemaining,
             category: task.category,
-            employee: task.employee,
+            employee: task.employee
+              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
+              : null,
           },
         })
       }
 
       // Pages: One per one-off task (printed like special tasks)
-      for (const task of pendingOneOffTasks) {
+      for (const task of taskResult.oneOffTasks) {
         const taskDueDate = new Date(task.dueDate)
         taskDueDate.setHours(0, 0, 0, 0)
         const daysRemaining = Math.ceil(
@@ -266,7 +198,9 @@ export async function GET(request: NextRequest) {
             dueDate: taskDueDate.toLocaleDateString('pt-BR'),
             daysRemaining,
             category: task.category,
-            employee: task.employee,
+            employee: task.employee
+              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
+              : null,
           },
         })
       }
@@ -283,9 +217,9 @@ export async function GET(request: NextRequest) {
         houseName,
         date: formattedDate,
         pages,
-        totalTasks: scheduledTasks.length,
-        totalSpecialTasks: scheduledSpecialTasks.length,
-        totalOneOffTasks: pendingOneOffTasks.length,
+        totalTasks: taskResult.tasks.length,
+        totalSpecialTasks: taskResult.specialTasks.length,
+        totalOneOffTasks: taskResult.oneOffTasks.length,
         hasMenu: !!(lunch || dinner),
       })
     }

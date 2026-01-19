@@ -4,35 +4,12 @@ import { useState, useEffect, useCallback, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button, Card, CardHeader, CardTitle, CardContent, Badge } from '@/components/ui'
 import { Category, Role } from '@prisma/client'
-import type { TasksForDateResult } from '@/lib/tasks-for-date'
+import type { TasksForDateResult, TasksForWeekResult } from '@/lib/task-scheduler'
 
 type ViewMode = 'daily' | 'weekly'
 
-interface WeekDayTasks {
-  date: string
-  dayOfWeek: number
-  tasks: {
-    id: string
-    title: string
-    description: string | null
-    category: Category
-  }[]
-}
-
-interface EmployeeWeekSchedule {
-  id: string
-  name: string
-  role: Role
-  workDays: number[]
-  days: WeekDayTasks[]
-}
-
-export interface WeeklyScheduleResponse {
-  weekStart: string
-  weekEnd: string
-  employees: EmployeeWeekSchedule[]
-  unassigned: EmployeeWeekSchedule | null
-}
+// Re-export for backward compatibility with page.tsx
+export type WeeklyScheduleResponse = TasksForWeekResult
 
 const CATEGORY_ICONS: Record<Category, string> = {
   LIMPEZA: '🧹',

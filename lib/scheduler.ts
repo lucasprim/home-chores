@@ -1,7 +1,6 @@
 import cron, { type ScheduledTask } from 'node-cron'
 import { prisma } from './prisma'
-import { TaskType } from '@prisma/client'
-import { isTaskScheduledForDate } from './rrule-utils'
+import { getTasksForDate, markOneOffTasksAsPrinted } from './task-scheduler'
 import { printMultiPageDaily, printWeeklyMenu, PrinterType, PrintPage } from './printer'
 import type { PrintJob, Employee } from '@prisma/client'
 
@@ -114,6 +113,13 @@ export async function rescheduleJob(jobId: string): Promise<void> {
   }
 }
 
+function formatDateStr(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 /**
  * Execute a print job by ID
  */
@@ -148,6 +154,7 @@ export async function executePrintJob(jobId: string): Promise<{
 
   const today = new Date()
   const dayOfWeek = today.getDay()
+  const todayStr = formatDateStr(today)
 
   try {
     if (job.type === 'DAILY_TASKS') {
@@ -161,65 +168,12 @@ export async function executePrintJob(jobId: string): Promise<{
         }
       }
 
-      // Get all active tasks from the unified table
-      const allTasks = await prisma.task.findMany({
-        where: {
-          active: true,
-          ...(job.employeeId && { employeeId: job.employeeId }),
-        },
-        include: {
-          employee: {
-            select: { id: true, name: true, role: true, workDays: true },
-          },
-        },
+      // Get tasks using unified engine
+      const taskResult = await getTasksForDate(todayStr, {
+        employeeId: job.employeeId || undefined,
       })
 
-      // Filter RECURRING tasks scheduled for today (with startDate filtering)
-      const scheduledTasks = allTasks
-        .filter((task) => task.taskType === TaskType.RECURRING)
-        .filter((task) => {
-          if (!task.rrule || !isTaskScheduledForDate(task.rrule, today, task.startDate)) return false
-          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-          return true
-        })
-
-      // Filter SPECIAL tasks scheduled for today (with startDate filtering)
-      const scheduledSpecialTasks = allTasks
-        .filter((task) => task.taskType === TaskType.SPECIAL)
-        .filter((task) => {
-          if (!task.rrule || !isTaskScheduledForDate(task.rrule, today, task.startDate)) return false
-          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-          return true
-        })
-        .map((task) => {
-          const dueDate = new Date(today)
-          dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
-          return {
-            ...task,
-            dueDate,
-            employeeInfo: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
-          }
-        })
-
-      // Filter ONE_OFF tasks (pending, not yet printed)
-      const pendingOneOffTasks = allTasks
-        .filter((task) => task.taskType === TaskType.ONE_OFF && task.printedAt === null)
-        .filter((task) => {
-          if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
-          return true
-        })
-        .map((task) => {
-          const dueDate = new Date(today)
-          dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
-          return {
-            ...task,
-            dueDate,
-            employeeInfo: task.employee ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role } : null,
-          }
-        })
-
       // Get meals for today
-      const todayStr = today.toISOString().split('T')[0]!
       const meals = await prisma.mealSchedule.findMany({
         where: {
           date: {
@@ -234,7 +188,13 @@ export async function executePrintJob(jobId: string): Promise<{
       const dinner = meals.find((m) => m.mealType === 'JANTAR')?.dish.name
 
       // Check if we have anything to print
-      if (scheduledTasks.length === 0 && scheduledSpecialTasks.length === 0 && pendingOneOffTasks.length === 0 && !lunch && !dinner) {
+      if (
+        taskResult.tasks.length === 0 &&
+        taskResult.specialTasks.length === 0 &&
+        taskResult.oneOffTasks.length === 0 &&
+        !lunch &&
+        !dinner
+      ) {
         await createPrintLog(jobId, 'SKIPPED', 'Nenhuma tarefa, cardápio, tarefa especial ou avulsa para hoje')
         return {
           success: false,
@@ -257,7 +217,7 @@ export async function executePrintJob(jobId: string): Promise<{
         }
       > = {}
 
-      for (const task of scheduledTasks) {
+      for (const task of taskResult.tasks) {
         if (!task.employee) {
           unassignedTasks.push({
             title: task.title,
@@ -306,29 +266,33 @@ export async function executePrintJob(jobId: string): Promise<{
       }
 
       // Pages: One per special task
-      for (const task of scheduledSpecialTasks) {
+      for (const task of taskResult.specialTasks) {
         pages.push({
           type: 'SPECIAL_TASK',
           task: {
             title: task.title,
             description: task.description,
-            dueDate: task.dueDate,
+            dueDate: new Date(task.dueDate),
             category: task.category,
-            employee: task.employeeInfo,
+            employee: task.employee
+              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
+              : null,
           },
         })
       }
 
       // Pages: One per one-off task (printed like special tasks)
-      for (const task of pendingOneOffTasks) {
+      for (const task of taskResult.oneOffTasks) {
         pages.push({
           type: 'SPECIAL_TASK',
           task: {
             title: task.title,
             description: task.description,
-            dueDate: task.dueDate,
+            dueDate: new Date(task.dueDate),
             category: task.category,
-            employee: task.employeeInfo,
+            employee: task.employee
+              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
+              : null,
           },
         })
       }
@@ -342,27 +306,22 @@ export async function executePrintJob(jobId: string): Promise<{
         pages,
       })
 
-      // Mark ONE_OFF tasks as printed after successful print (using unified Task model)
-      const markOneOffTasksPromise = pendingOneOffTasks.length > 0
-        ? prisma.task.updateMany({
-            where: { id: { in: pendingOneOffTasks.map((t) => t.id) } },
-            data: { printedAt: new Date(), active: false },
-          })
-        : Promise.resolve()
-
+      // Mark ONE_OFF tasks as printed using unified function and update job
       await Promise.all([
+        taskResult.oneOffTasks.length > 0
+          ? markOneOffTasksAsPrinted(taskResult.oneOffTasks.map((t) => t.id))
+          : Promise.resolve(),
         createPrintLog(jobId, 'SUCCESS'),
         prisma.printJob.update({
           where: { id: jobId },
           data: { lastRunAt: new Date() },
         }),
-        markOneOffTasksPromise,
       ])
 
       return {
         success: true,
         status: 'SUCCESS',
-        message: `Impresso com sucesso! ${scheduledTasks.length} tarefa(s), ${scheduledSpecialTasks.length} especial(is), ${pendingOneOffTasks.length} avulsa(s)`,
+        message: `Impresso com sucesso! ${taskResult.tasks.length} tarefa(s), ${taskResult.specialTasks.length} especial(is), ${taskResult.oneOffTasks.length} avulsa(s)`,
       }
     }
 
