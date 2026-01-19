@@ -171,7 +171,7 @@ export function isTaskScheduledForDate(rruleStr: string, date: Date, startDate?:
  * without doing expensive occurrence calculations.
  *
  * Note: For monthly/yearly rules, this returns the weekdays for a reference week.
- * For interval-based daily rules (every N days), returns all days as approximation.
+ * For interval-based daily rules (every N days), calculates actual occurrences in the week.
  *
  * @param rruleStr - The rrule string
  * @param weekStart - Optional: The start date of the week being displayed (for startDate filtering)
@@ -206,8 +206,25 @@ export function getScheduledWeekdays(
       const rule = RRule.fromString(normalizedRule)
       const options = rule.options
 
-      // Daily frequency
-      if (options.freq === RRule.DAILY) {
+      // Daily frequency with interval > 1 requires actual calculation
+      if (options.freq === RRule.DAILY && options.interval && options.interval > 1 && weekStart) {
+        // For interval-based daily rules, we need to calculate actual occurrences
+        const dtstart = taskStartDate
+          ? new Date(Date.UTC(taskStartDate.getFullYear(), taskStartDate.getMonth(), taskStartDate.getDate(), 0, 0, 0))
+          : new Date(Date.UTC(2000, 0, 1, 0, 0, 0))
+
+        const ruleWithStart = new RRule({
+          ...rule.origOptions,
+          dtstart,
+        })
+
+        const weekStartUTC = new Date(Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate(), 0, 0, 0))
+        const weekEndUTC = new Date(Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6, 23, 59, 59))
+
+        const occurrences = ruleWithStart.between(weekStartUTC, weekEndUTC, true)
+        baseWeekdays = [...new Set(occurrences.map(d => d.getUTCDay()))]
+      } else if (options.freq === RRule.DAILY) {
+        // Simple daily (no interval or interval=1)
         baseWeekdays = [0, 1, 2, 3, 4, 5, 6] // All days
       } else if (options.freq === RRule.WEEKLY && options.byweekday) {
         // RRule uses 0=Monday, we need to convert to JS 0=Sunday
