@@ -24,6 +24,11 @@ Tela de **preview** que mostra o que será impresso para um determinado dia. Est
 **Quero** imprimir a lista do dia a partir do preview
 **Para** ter acesso rápido à impressão
 
+### US-04: Ver agenda semanal
+**Como** usuário
+**Quero** ver a agenda semanal de tarefas por funcionário
+**Para** ter uma visão geral das tarefas recorrentes da semana
+
 ## Wireframe
 
 ```
@@ -59,6 +64,44 @@ Tela de **preview** que mostra o que será impresso para um determinado dia. Est
 ```
 
 **Nota**: Não há checkboxes - esta é uma visualização read-only do que será impresso.
+
+## Wireframe - Vista Semanal
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│           [ Diário ] [ Semanal ]                                   │
+├────────────────────────────────────────────────────────────────────┤
+│     ← 13 de jan. - 19 de jan. →                                    │
+│              Voltar para esta semana                               │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  ┌─ Maria (Faxineira) ─────────────────── 15 tarefas na semana ──┐│
+│  │ ┌─Seg─┐ ┌─Ter─┐ ┌─Qua─┐ ┌─Qui─┐ ┌─Sex─┐ ┌─Sáb─┐ ┌─Dom─┐       ││
+│  │ │🧹Lim│ │🧹Lim│ │🧹Lim│ │🧹Lim│ │🧹Lim│ │Folga│ │Folga│       ││
+│  │ │🧺Lav│ │🧺Lav│ │🧺Lav│ │🧺Lav│ │🧺Lav│ │     │ │     │       ││
+│  │ │📦Org│ │     │ │📦Org│ │     │ │📦Org│ │     │ │     │       ││
+│  │ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘       ││
+│  └────────────────────────────────────────────────────────────────┘│
+│                                                                    │
+│  ┌─ Joana (Cozinheira) ──────────────── 21 tarefas na semana ────┐│
+│  │ ┌─Seg─┐ ┌─Ter─┐ ┌─Qua─┐ ┌─Qui─┐ ┌─Sex─┐ ┌─Sáb─┐ ┌─Dom─┐       ││
+│  │ │🍳Alm│ │🍳Alm│ │🍳Alm│ │🍳Alm│ │🍳Alm│ │🍳Alm│ │🍳Alm│       ││
+│  │ │🍳Jan│ │🍳Jan│ │🍳Jan│ │🍳Jan│ │🍳Jan│ │🍳Jan│ │🍳Jan│       ││
+│  │ │🛒Com│ │     │ │🛒Com│ │     │ │🛒Com│ │     │ │     │       ││
+│  │ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘       ││
+│  └────────────────────────────────────────────────────────────────┘│
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Características:**
+- Toggle entre vista Diária e Semanal
+- Grade de 7 colunas (Seg a Dom)
+- Dias de folga do funcionário aparecem esmaecidos com "Folga"
+- Dias de trabalho mostram as tarefas com ícones de categoria
+- Header do dia é destacado quando o funcionário trabalha
+- Navegação por semanas (setas avançam/recuam 7 dias)
+- Apenas tarefas recorrentes são exibidas (não especiais ou avulsas)
 
 ## Componentes
 
@@ -175,6 +218,49 @@ const { tasks, specialTasks } = await response.json()
 ```
 
 **Nota**: Não há API de "marcar tarefa" - este sistema não rastreia conclusão.
+
+### Carregar agenda semanal
+
+```typescript
+// GET /api/tasks/for-week?date=2024-01-16
+
+const response = await fetch(`/api/tasks/for-week?date=${date}`)
+const { weekStart, weekEnd, employees, unassigned } = await response.json()
+
+// employees: array de funcionários com seus dias e tarefas
+// unassigned: tarefas sem funcionário atribuído (ou null)
+```
+
+**Estrutura de resposta:**
+
+```typescript
+interface WeeklyScheduleResponse {
+  weekStart: string        // "2024-01-13" (segunda-feira)
+  weekEnd: string          // "2024-01-19" (domingo)
+  employees: {
+    id: string
+    name: string
+    role: string
+    workDays: number[]     // [1, 2, 3, 4, 5] = dias que trabalha
+    days: {
+      date: string         // "2024-01-13"
+      dayOfWeek: number    // 1 = segunda
+      tasks: {
+        id: string
+        title: string
+        description: string | null
+        category: string
+      }[]
+    }[]
+  }[]
+  unassigned: {...} | null
+}
+```
+
+**Otimização de performance:**
+- RRule de cada tarefa é parseado apenas uma vez
+- Weekdays são extraídos sem cálculo de ocorrências
+- Queries de banco são executadas em paralelo
 
 ## Lógica de Negócio
 

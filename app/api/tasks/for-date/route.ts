@@ -48,8 +48,8 @@ export async function GET(request: NextRequest) {
     const recurringTasks = allTasks
       .filter((task) => task.taskType === TaskType.RECURRING)
       .filter((task) => {
-        // Check if task is scheduled for this date based on rrule
-        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) {
+        // Check if task is scheduled for this date based on rrule (with startDate filtering)
+        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date, task.startDate)) {
           return false
         }
         // Check if employee works on this day
@@ -63,8 +63,8 @@ export async function GET(request: NextRequest) {
     const specialTasks = allTasks
       .filter((task) => task.taskType === TaskType.SPECIAL)
       .filter((task) => {
-        // Check if task is scheduled for this date based on rrule
-        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) {
+        // Check if task is scheduled for this date based on rrule (with startDate filtering)
+        if (!task.rrule || !isTaskScheduledForDate(task.rrule, date, task.startDate)) {
           return false
         }
         // Check if employee works on this day

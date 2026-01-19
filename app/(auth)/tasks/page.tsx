@@ -22,6 +22,7 @@ interface Task {
   rrule: string | null
   dueDays: number | null
   printedAt: string | null
+  startDate: string | null
   employeeId: string | null
   employee: Employee | null
   active: boolean
@@ -286,6 +287,17 @@ export default function TasksPage() {
       if (task.rrule) parts.push(rruleToReadable(task.rrule))
     } else if (task.rrule) {
       parts.push(rruleToReadable(task.rrule))
+    }
+
+    // Show start date if set (for RECURRING and SPECIAL)
+    if (task.startDate && (task.taskType === 'RECURRING' || task.taskType === 'SPECIAL')) {
+      const startDate = new Date(task.startDate)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      startDate.setHours(0, 0, 0, 0)
+      if (startDate > today) {
+        parts.push(`inicia ${startDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`)
+      }
     }
 
     return parts.join(' · ')
@@ -588,6 +600,11 @@ function TaskForm({ task, employees, defaultType, onSuccess, onCancel }: TaskFor
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Start date state (for RECURRING and SPECIAL tasks)
+  const [startDate, setStartDate] = useState<string>(
+    task?.startDate ? new Date(task.startDate).toISOString().split('T')[0]! : ''
+  )
+
   // Recurrence state
   const parsed = task?.rrule ? parseRuleToPreset(task.rrule) : { type: 'daily' as RecurrenceType }
   const [recurrenceType, setRecurrenceType] = useState<RecurrenceType>(parsed.type)
@@ -643,6 +660,8 @@ function TaskForm({ task, employees, defaultType, onSuccess, onCancel }: TaskFor
       // Add rrule for RECURRING and SPECIAL
       if (taskType === 'RECURRING' || taskType === 'SPECIAL') {
         body.rrule = getRrule()
+        // Add startDate if set
+        body.startDate = startDate || null
       }
 
       // Add dueDays for SPECIAL and ONE_OFF
@@ -920,6 +939,25 @@ function TaskForm({ task, employees, defaultType, onSuccess, onCancel }: TaskFor
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Start Date (for RECURRING and SPECIAL tasks) */}
+      {(taskType === 'RECURRING' || taskType === 'SPECIAL') && (
+        <div>
+          <label className="block text-sm font-medium mb-1">Inicia em</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            min={new Date().toISOString().split('T')[0]}
+            className="w-48 h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
+          />
+          <p className="text-xs text-[var(--muted-foreground)] mt-1">
+            {startDate
+              ? `A tarefa só aparecerá a partir de ${new Date(startDate + 'T12:00:00').toLocaleDateString('pt-BR')}.`
+              : 'Deixe em branco para começar imediatamente.'}
+          </p>
         </div>
       )}
 

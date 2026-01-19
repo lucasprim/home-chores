@@ -174,20 +174,20 @@ export async function executePrintJob(jobId: string): Promise<{
         },
       })
 
-      // Filter RECURRING tasks scheduled for today
+      // Filter RECURRING tasks scheduled for today (with startDate filtering)
       const scheduledTasks = allTasks
         .filter((task) => task.taskType === TaskType.RECURRING)
         .filter((task) => {
-          if (!task.rrule || !isTaskScheduledForDate(task.rrule, today)) return false
+          if (!task.rrule || !isTaskScheduledForDate(task.rrule, today, task.startDate)) return false
           if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
           return true
         })
 
-      // Filter SPECIAL tasks scheduled for today
+      // Filter SPECIAL tasks scheduled for today (with startDate filtering)
       const scheduledSpecialTasks = allTasks
         .filter((task) => task.taskType === TaskType.SPECIAL)
         .filter((task) => {
-          if (!task.rrule || !isTaskScheduledForDate(task.rrule, today)) return false
+          if (!task.rrule || !isTaskScheduledForDate(task.rrule, today, task.startDate)) return false
           if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
           return true
         })

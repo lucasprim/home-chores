@@ -344,6 +344,90 @@ Remove tarefa (soft delete).
 }
 ```
 
+### GET /api/tasks/for-date
+
+Retorna tarefas para uma data específica (para impressão).
+
+**Query Parameters:**
+| Param | Tipo | Required | Descrição |
+|-------|------|----------|-----------|
+| date | string | Sim | Data (YYYY-MM-DD) |
+| employeeId | string | Não | Filtrar por funcionário |
+
+**Response (200):**
+```json
+{
+  "date": "2024-01-16",
+  "tasks": [
+    {
+      "id": "clx456...",
+      "title": "Limpar cozinha",
+      "category": "LIMPEZA",
+      "employee": { "id": "clx123...", "name": "Maria", "role": "FAXINEIRA" }
+    }
+  ],
+  "specialTasks": [
+    {
+      "id": "clx789...",
+      "title": "Limpar vidros",
+      "dueDays": 7,
+      "appearDate": "2024-01-16",
+      "dueDate": "2024-01-23",
+      "employee": { "id": "clx123...", "name": "Maria", "role": "FAXINEIRA" }
+    }
+  ],
+  "oneOffTasks": [
+    {
+      "id": "clx999...",
+      "title": "Organizar depósito",
+      "dueDays": 3,
+      "dueDate": "2024-01-19",
+      "employee": null
+    }
+  ]
+}
+```
+
+### GET /api/tasks/for-week
+
+Retorna agenda semanal de tarefas recorrentes por funcionário.
+
+**Query Parameters:**
+| Param | Tipo | Required | Descrição |
+|-------|------|----------|-----------|
+| date | string | Sim | Qualquer data da semana (YYYY-MM-DD) |
+
+**Response (200):**
+```json
+{
+  "weekStart": "2024-01-13",
+  "weekEnd": "2024-01-19",
+  "employees": [
+    {
+      "id": "clx123...",
+      "name": "Maria",
+      "role": "FAXINEIRA",
+      "workDays": [1, 2, 3, 4, 5],
+      "days": [
+        {
+          "date": "2024-01-13",
+          "dayOfWeek": 1,
+          "tasks": [
+            { "id": "clx456...", "title": "Limpar cozinha", "category": "LIMPEZA" }
+          ]
+        }
+      ]
+    }
+  ],
+  "unassigned": null
+}
+```
+
+**Performance:**
+- RRule parseado uma única vez por tarefa
+- Queries executadas em paralelo
+- Apenas tarefas recorrentes são incluídas
+
 ---
 
 ## Ocorrências

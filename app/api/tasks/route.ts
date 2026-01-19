@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { title, description, category, employeeId, taskType, rrule, dueDays } = body
+    const { title, description, category, employeeId, taskType, rrule, dueDays, startDate } = body
 
     // Default to RECURRING if not specified
     const type = (taskType && Object.values(TaskType).includes(taskType))
@@ -85,6 +85,16 @@ export async function POST(request: NextRequest) {
     // Type-specific validation
     let validatedRrule: string | null = null
     let validatedDueDays: number | null = null
+    let validatedStartDate: Date | null = null
+
+    // Validate startDate (for RECURRING and SPECIAL tasks)
+    if (startDate && (type === TaskType.RECURRING || type === TaskType.SPECIAL)) {
+      const parsedStartDate = new Date(startDate)
+      if (isNaN(parsedStartDate.getTime())) {
+        return NextResponse.json({ error: 'Data de início inválida' }, { status: 400 })
+      }
+      validatedStartDate = parsedStartDate
+    }
 
     if (type === TaskType.RECURRING || type === TaskType.SPECIAL) {
       // RECURRING and SPECIAL require rrule
@@ -127,6 +137,7 @@ export async function POST(request: NextRequest) {
         rrule: validatedRrule,
         dueDays: validatedDueDays,
         printedAt: null, // Always null on creation
+        startDate: validatedStartDate,
       },
       include: {
         employee: {

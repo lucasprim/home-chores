@@ -128,16 +128,28 @@ export function parseRuleToPreset(rruleStr: string): {
   return { type: 'custom' }
 }
 
-export function isTaskScheduledForDate(rruleStr: string, date: Date): boolean {
+export function isTaskScheduledForDate(rruleStr: string, date: Date, startDate?: Date | null): boolean {
   try {
+    // If startDate is specified and target date is before it, task is not scheduled
+    if (startDate) {
+      const targetDateOnly = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+      const startDateOnly = new Date(Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()))
+      if (targetDateOnly < startDateOnly) {
+        return false
+      }
+    }
+
     const normalizedRule = rruleStr.replace('RRULE:', '')
     const rule = RRule.fromString(normalizedRule)
 
-    // Set dtstart to a date far in the past so between() works correctly
-    // Without dtstart, RRule can't calculate occurrences properly
+    // Use startDate as dtstart for RRule calculation (if provided), otherwise use far past date
+    const dtstart = startDate
+      ? new Date(Date.UTC(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 0, 0, 0))
+      : new Date(Date.UTC(2000, 0, 1, 0, 0, 0))
+
     const ruleWithStart = new RRule({
       ...rule.origOptions,
-      dtstart: new Date(Date.UTC(2000, 0, 1, 0, 0, 0)),
+      dtstart,
     })
 
     // Use UTC dates to avoid timezone issues
@@ -148,6 +160,112 @@ export function isTaskScheduledForDate(rruleStr: string, date: Date): boolean {
     return occurrences.length > 0
   } catch {
     return false
+  }
+}
+
+/**
+ * Returns an array of weekday numbers (0=Sunday, 1=Monday, ..., 6=Saturday)
+ * when a task is scheduled to run based on its rrule.
+ *
+ * This is optimized for weekly schedule views - it extracts the weekdays
+ * without doing expensive occurrence calculations.
+ *
+ * Note: For monthly/yearly rules, this returns the weekdays for a reference week.
+ * For interval-based daily rules (every N days), returns all days as approximation.
+ *
+ * @param rruleStr - The rrule string
+ * @param weekStart - Optional: The start date of the week being displayed (for startDate filtering)
+ * @param taskStartDate - Optional: The task's startDate (for filtering out days before it starts)
+ */
+export function getScheduledWeekdays(
+  rruleStr: string,
+  weekStart?: Date | null,
+  taskStartDate?: Date | null
+): number[] {
+  try {
+    // If task has a startDate and the week ends before it, return empty (task doesn't appear this week)
+    if (weekStart && taskStartDate) {
+      const weekEnd = new Date(weekStart)
+      weekEnd.setDate(weekEnd.getDate() + 6)
+      const taskStartDateOnly = new Date(Date.UTC(taskStartDate.getFullYear(), taskStartDate.getMonth(), taskStartDate.getDate()))
+      const weekEndDateOnly = new Date(Date.UTC(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate()))
+      if (taskStartDateOnly > weekEndDateOnly) {
+        return [] // Task starts after this week ends
+      }
+    }
+
+    const normalizedRule = rruleStr.replace('RRULE:', '')
+
+    // Fast path for common presets
+    let baseWeekdays: number[]
+    if (normalizedRule === 'FREQ=DAILY') {
+      baseWeekdays = [0, 1, 2, 3, 4, 5, 6] // All days
+    } else if (normalizedRule === 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR') {
+      baseWeekdays = [1, 2, 3, 4, 5] // Weekdays (Mon-Fri)
+    } else {
+      const rule = RRule.fromString(normalizedRule)
+      const options = rule.options
+
+      // Daily frequency
+      if (options.freq === RRule.DAILY) {
+        baseWeekdays = [0, 1, 2, 3, 4, 5, 6] // All days
+      } else if (options.freq === RRule.WEEKLY && options.byweekday) {
+        // RRule uses 0=Monday, we need to convert to JS 0=Sunday
+        const rruleToJsDayMap: Record<number, number> = {
+          0: 1, // MO -> 1
+          1: 2, // TU -> 2
+          2: 3, // WE -> 3
+          3: 4, // TH -> 4
+          4: 5, // FR -> 5
+          5: 6, // SA -> 6
+          6: 0, // SU -> 0
+        }
+
+        baseWeekdays = options.byweekday.map((d: Weekday | number) => {
+          const weekday = typeof d === 'number' ? d : d.weekday
+          return rruleToJsDayMap[weekday] ?? weekday
+        })
+      } else if (options.freq === RRule.MONTHLY && options.bymonthday && options.bymonthday.length > 0) {
+        // For monthly, we need to check which weekday the specific date falls on
+        // Since this varies by month, return all days as we can't determine statically
+        baseWeekdays = [0, 1, 2, 3, 4, 5, 6]
+      } else {
+        // For other complex rules, return all days (conservative approach)
+        baseWeekdays = [0, 1, 2, 3, 4, 5, 6]
+      }
+    }
+
+    // Filter out weekdays before the task's startDate if it falls within this week
+    if (weekStart && taskStartDate) {
+      const weekStartOnly = new Date(Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate()))
+      const taskStartOnly = new Date(Date.UTC(taskStartDate.getFullYear(), taskStartDate.getMonth(), taskStartDate.getDate()))
+
+      // Only filter if taskStartDate is within or after this week
+      if (taskStartOnly >= weekStartOnly) {
+        // Calculate which day of the week the task starts
+        // weekStart is typically Monday (day 1 in JS)
+        const taskStartDayOfWeek = taskStartDate.getDay()
+
+        // Filter out days before the task start
+        return baseWeekdays.filter(dow => {
+          // Calculate the date for this day of the week
+          const dayOffset = dow === 0 ? 6 : dow - 1 // Convert JS dow to offset from Monday
+          const weekStartDow = weekStart.getDay()
+          const weekStartOffset = weekStartDow === 0 ? 6 : weekStartDow - 1
+
+          // The actual date of this weekday
+          const dayDate = new Date(weekStart)
+          dayDate.setDate(weekStart.getDate() + (dayOffset - weekStartOffset))
+
+          const dayDateOnly = new Date(Date.UTC(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate()))
+          return dayDateOnly >= taskStartOnly
+        })
+      }
+    }
+
+    return baseWeekdays
+  } catch {
+    return [] // Invalid rule, task won't appear
   }
 }
 

@@ -31,7 +31,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
     const body = await request.json()
-    const { title, description, category, employeeId, taskType, rrule, dueDays, active, resetPrinted } = body
+    const { title, description, category, employeeId, taskType, rrule, dueDays, active, resetPrinted, startDate } = body
 
     const existing = await prisma.task.findUnique({ where: { id } })
     if (!existing) {
@@ -87,6 +87,19 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
+    // startDate validation (for RECURRING and SPECIAL tasks)
+    if (startDate !== undefined) {
+      if (effectiveType === TaskType.ONE_OFF) {
+        return NextResponse.json({ error: 'Tarefas avulsas não podem ter data de início' }, { status: 400 })
+      }
+      if (startDate !== null) {
+        const parsedStartDate = new Date(startDate)
+        if (isNaN(parsedStartDate.getTime())) {
+          return NextResponse.json({ error: 'Data de início inválida' }, { status: 400 })
+        }
+      }
+    }
+
     // Build update data
     const dataUpdates: Record<string, unknown> = {}
 
@@ -100,6 +113,7 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
     if (rrule !== undefined) dataUpdates.rrule = rrule
     if (dueDays !== undefined) dataUpdates.dueDays = parseInt(dueDays)
     if (active !== undefined) dataUpdates.active = active
+    if (startDate !== undefined) dataUpdates.startDate = startDate ? new Date(startDate) : null
 
     // Reset printed state for ONE_OFF tasks (for re-printing)
     if (resetPrinted === true && effectiveType === TaskType.ONE_OFF) {

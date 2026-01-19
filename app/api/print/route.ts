@@ -64,16 +64,16 @@ export async function POST(request: NextRequest) {
         },
       })
 
-      // Filter RECURRING tasks scheduled for this date
+      // Filter RECURRING tasks scheduled for this date (with startDate filtering)
       const scheduledTasks = allTasks
         .filter((task) => task.taskType === TaskType.RECURRING)
         .filter((task) => {
-          if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
+          if (!task.rrule || !isTaskScheduledForDate(task.rrule, date, task.startDate)) return false
           if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
           return true
         })
 
-      // Get SPECIAL tasks scheduled for this date (if enabled)
+      // Get SPECIAL tasks scheduled for this date (if enabled, with startDate filtering)
       let scheduledSpecialTasks: Array<{
         id: string
         title: string
@@ -87,7 +87,7 @@ export async function POST(request: NextRequest) {
         scheduledSpecialTasks = allTasks
           .filter((task) => task.taskType === TaskType.SPECIAL)
           .filter((task) => {
-            if (!task.rrule || !isTaskScheduledForDate(task.rrule, date)) return false
+            if (!task.rrule || !isTaskScheduledForDate(task.rrule, date, task.startDate)) return false
             if (task.employee && !task.employee.workDays.includes(dayOfWeek)) return false
             return true
           })

@@ -54,6 +54,7 @@ model Task {
   rrule       String?   // Required for RECURRING and SPECIAL, null for ONE_OFF
   dueDays     Int?      // Required for SPECIAL and ONE_OFF (default 7)
   printedAt   DateTime? // Only for ONE_OFF (null = pending, set after print)
+  startDate   DateTime? // When recurrence begins (null = immediate)
 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
