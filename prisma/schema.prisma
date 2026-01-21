@@ -210,3 +210,19 @@ enum PrintStatus {
 
   @@map("print_status")
 }
+
+// ============================================
+// MENSAGENS PARA IMPRESSÃO
+// ============================================
+
+model PrintMessage {
+  id         String    @id @default(cuid())
+  title      String    @db.VarChar(100)
+  content    String    @db.Text
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  lastUsedAt DateTime?
+
+  @@map("print_messages")
+}

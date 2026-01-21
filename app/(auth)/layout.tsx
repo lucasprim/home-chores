@@ -1,6 +1,5 @@
-import Link from 'next/link'
 import { NavLink } from '@/components/nav-link'
-import { LogoutButton } from '@/components/logout-button'
+import { Header } from '@/components/header'
 
 const navItems = [
   { href: '/today', label: 'Hoje', icon: '📋' },
@@ -19,17 +18,7 @@ export default function AuthLayout({
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="bg-[var(--primary)] text-[var(--primary-foreground)] px-4 py-3 flex items-center justify-between">
-        <Link href="/today" className="text-xl font-bold">
-          Home Chores
-        </Link>
-        <div className="flex items-center gap-3">
-          <Link href="/settings" className="text-xl" title="Configurações">
-            ⚙️
-          </Link>
-          <LogoutButton />
-        </div>
-      </header>
+      <Header />
 
       {/* Main content */}
       <main className="flex-1 p-4 pb-20">

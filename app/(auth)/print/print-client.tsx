@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { Button, Card, CardHeader, CardTitle, CardContent, Input } from '@/components/ui'
 import { Role } from '@prisma/client'
+import { ThermalPaperPreview } from '@/components/thermal-paper-preview'
 
 interface Employee {
   id: string
@@ -47,6 +48,7 @@ interface DailyTasksPreview {
   houseName: string
   date: string
   pages: PreviewPage[]
+  previewHtml: string
   totalTasks: number
   totalSpecialTasks: number
   hasMenu: boolean
@@ -61,6 +63,7 @@ interface WeeklyMenuPreview {
     lunch: string | null
     dinner: string | null
   }[]
+  previewHtml: string
 }
 
 type PrintPreview = DailyTasksPreview | WeeklyMenuPreview
@@ -253,9 +256,9 @@ export function PrintPageClient({ initialDate, employees }: PrintPageClientProps
         <CardContent>
           {loadingPreview ? (
             <div className="text-center py-4 text-[var(--muted-foreground)]">Carregando...</div>
-          ) : preview ? (
-            <div className="bg-[var(--secondary)] rounded-lg p-4 font-mono text-sm overflow-auto max-h-[600px]">
-              <PreviewContent preview={preview} />
+          ) : preview?.previewHtml ? (
+            <div className="overflow-auto max-h-[600px]">
+              <ThermalPaperPreview html={preview.previewHtml} />
             </div>
           ) : (
             <div className="text-center py-4 text-[var(--muted-foreground)]">
@@ -274,157 +277,3 @@ export function PrintPageClient({ initialDate, employees }: PrintPageClientProps
   )
 }
 
-function PreviewContent({ preview }: { preview: PrintPreview }) {
-  if (preview.type === 'DAILY_TASKS') {
-    if (preview.pages.length === 0) {
-      return (
-        <div className="text-center text-[var(--muted-foreground)]">
-          Nenhuma tarefa, cardápio ou tarefa especial para este dia
-        </div>
-      )
-    }
-
-    return (
-      <div className="space-y-6">
-        {preview.pages.map((page, index) => (
-          <div key={index}>
-            {index > 0 && (
-              <div className="flex items-center gap-2 my-4 text-[var(--muted-foreground)]">
-                <div className="flex-1 border-t border-dashed border-[var(--border)]" />
-                <span className="text-xs flex items-center gap-1">✂️ corte parcial</span>
-                <div className="flex-1 border-t border-dashed border-[var(--border)]" />
-              </div>
-            )}
-            <PagePreview page={page} houseName={preview.houseName} date={preview.date} />
-          </div>
-        ))}
-      </div>
-    )
-  }
-
-  if (preview.type === 'WEEKLY_MENU') {
-    return (
-      <div className="text-center">
-        <div className="font-bold text-lg">{preview.houseName.toUpperCase()}</div>
-        <div>================================</div>
-        <div className="font-bold mt-2">CARDÁPIO DA SEMANA</div>
-        <div>{preview.period}</div>
-        <div className="mt-2"></div>
-
-        {preview.days.map((day, index) => (
-          <div key={index} className="mt-3">
-            <div>--------------------------------</div>
-            <div className="font-bold uppercase">{day.date}</div>
-            <div>Almoço: {day.lunch ?? '(não definido)'}</div>
-            <div>Jantar: {day.dinner ?? '(não definido)'}</div>
-          </div>
-        ))}
-
-        <div className="mt-4">================================</div>
-      </div>
-    )
-  }
-
-  return null
-}
-
-function PagePreview({
-  page,
-  houseName,
-  date,
-}: {
-  page: PreviewPage
-  houseName: string
-  date: string
-}) {
-  if (page.type === 'UNASSIGNED_TASKS' || page.type === 'EMPLOYEE_TASKS') {
-    const title = page.type === 'UNASSIGNED_TASKS' ? 'TAREFAS GERAIS' : page.title.toUpperCase()
-    return (
-      <div className="text-center">
-        <div className="font-bold text-lg">{houseName.toUpperCase()}</div>
-        <div>================================</div>
-        <div className="font-bold mt-2">{title}</div>
-        <div className="text-xs">{date}</div>
-        <div className="mt-2">
-          {page.tasks.map((task, i) => (
-            <div key={i}>
-              <div>[ ] {task.title}</div>
-              {task.description && (
-                <div className="text-[var(--muted-foreground)]">{task.description}</div>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="mt-2">
-          <div>
-            {page.tasks.length} tarefa{page.tasks.length !== 1 ? 's' : ''}
-          </div>
-        </div>
-        <div>================================</div>
-      </div>
-    )
-  }
-
-  if (page.type === 'MENU') {
-    return (
-      <div className="text-center">
-        <div className="font-bold text-lg">{houseName.toUpperCase()}</div>
-        <div>================================</div>
-        <div className="font-bold mt-2">CARDÁPIO DO DIA</div>
-        <div className="text-xs">{date}</div>
-        <div className="mt-2">
-          {page.lunch && (
-            <div>
-              <span className="font-bold">Almoço:</span> {page.lunch}
-            </div>
-          )}
-          {page.dinner && (
-            <div>
-              <span className="font-bold">Jantar:</span> {page.dinner}
-            </div>
-          )}
-        </div>
-        <div className="mt-2">================================</div>
-      </div>
-    )
-  }
-
-  if (page.type === 'SPECIAL_TASK') {
-    const { task } = page
-    const daysLabel =
-      task.daysRemaining < 0
-        ? `ATRASADA ${Math.abs(task.daysRemaining)} dia${Math.abs(task.daysRemaining) !== 1 ? 's' : ''}!`
-        : task.daysRemaining === 0
-          ? 'VENCE HOJE!'
-          : task.daysRemaining === 1
-            ? 'VENCE AMANHÃ!'
-            : `${task.daysRemaining} dias restantes`
-
-    return (
-      <div className="text-center">
-        <div className="text-yellow-600 dark:text-yellow-400">****************************</div>
-        <div className="font-bold text-lg mt-1">TAREFA ESPECIAL</div>
-        <div className="text-yellow-600 dark:text-yellow-400">****************************</div>
-        <div className="font-bold mt-2">{houseName.toUpperCase()}</div>
-        <div className="mt-2 font-bold text-lg">[ ] {task.title.toUpperCase()}</div>
-        {task.description && (
-          <div className="mt-2 text-[var(--muted-foreground)]">{task.description}</div>
-        )}
-        <div className="mt-3 font-bold">
-          <div>
-            RESPONSÁVEL: {task.employee ? task.employee.name.toUpperCase() : 'NÃO ATRIBUÍDO'}
-          </div>
-        </div>
-        <div className="mt-2 font-bold">
-          <div>VENCE: {task.dueDate}</div>
-          <div className={task.daysRemaining <= 2 ? 'text-orange-600 dark:text-orange-400' : ''}>
-            ({daysLabel})
-          </div>
-        </div>
-        <div className="mt-2 text-yellow-600 dark:text-yellow-400">****************************</div>
-      </div>
-    )
-  }
-
-  return null
-}

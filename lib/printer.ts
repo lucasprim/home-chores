@@ -1,14 +1,15 @@
 import net from 'net'
 import iconv from 'iconv-lite'
+import { markdownToEscPos } from './markdown-printer'
 
 export type PrinterType = 'EPSON' | 'STAR' | 'TANCA' | 'DARUMA'
 
 const PRINTER_PORT = 9100
 
 // ESC/POS commands
-const ESC = '\x1B'
-const GS = '\x1D'
-const COMMANDS = {
+export const ESC = '\x1B'
+export const GS = '\x1D'
+export const COMMANDS = {
   INIT: `${ESC}@`,
   // Set character code table to PC860 (Portuguese) - ESC t n where n=3
   SET_CHARSET_PORTUGUESE: `${ESC}t\x03`,
@@ -288,7 +289,7 @@ export interface PrintMultiPageOptions {
   showNotesSection?: boolean
 }
 
-function formatTasksPage(
+export function formatTasksPage(
   tasks: TaskItem[],
   header: string,
   houseName: string,
@@ -354,7 +355,7 @@ function formatTasksPage(
   return lines
 }
 
-function formatMenuPage(
+export function formatMenuPage(
   houseName: string,
   date: Date,
   lunch?: string,
@@ -408,7 +409,7 @@ function formatMenuPage(
   return lines
 }
 
-function formatSpecialTaskPage(
+export function formatSpecialTaskPage(
   houseName: string,
   task: SpecialTaskItem
 ): string[] {
@@ -483,6 +484,126 @@ function formatSpecialTaskPage(
   return lines
 }
 
+export interface WeeklyMenuDay {
+  date: Date
+  lunch?: string
+  dinner?: string
+}
+
+export function formatWeeklyMenuPage(
+  houseName: string,
+  weekStart: Date,
+  days: WeeklyMenuDay[]
+): string[] {
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekEnd.getDate() + 6)
+
+  const periodStr = `${weekStart.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} a ${weekEnd.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
+
+  const lines: string[] = [
+    COMMANDS.INIT,
+    COMMANDS.SET_CHARSET_PORTUGUESE,
+    COMMANDS.ALIGN_CENTER,
+    COMMANDS.DOUBLE_HEIGHT_ON,
+    COMMANDS.BOLD_ON,
+    `${houseName.toUpperCase()}\n`,
+    COMMANDS.BOLD_OFF,
+    COMMANDS.DOUBLE_HEIGHT_OFF,
+    `${COMMANDS.LINE}\n`,
+    '\n',
+    COMMANDS.BOLD_ON,
+    `CARDAPIO DA SEMANA\n`,
+    COMMANDS.BOLD_OFF,
+    `${periodStr}\n`,
+    '\n',
+  ]
+
+  const weekDays = ['DOMINGO', 'SEGUNDA', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SABADO']
+
+  for (const day of days) {
+    const dayName = weekDays[day.date.getDay()]
+    const dayStr = day.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+
+    lines.push(`${COMMANDS.DASH_LINE}\n`)
+    lines.push(COMMANDS.BOLD_ON)
+    lines.push(`${dayName} ${dayStr}\n`)
+    lines.push(COMMANDS.BOLD_OFF)
+    lines.push(COMMANDS.ALIGN_LEFT)
+
+    if (day.lunch) {
+      lines.push(`Almoco: ${day.lunch}\n`)
+    }
+    if (day.dinner) {
+      lines.push(`Jantar: ${day.dinner}\n`)
+    }
+    if (!day.lunch && !day.dinner) {
+      lines.push(`(nao definido)\n`)
+    }
+
+    lines.push(COMMANDS.ALIGN_CENTER)
+  }
+
+  lines.push(`${COMMANDS.LINE}\n`)
+  lines.push('\n\n\n')
+  lines.push(COMMANDS.CUT)
+
+  return lines
+}
+
+export interface FormatMultiPageOptions {
+  houseName: string
+  date: Date
+  pages: PrintPage[]
+  showNotesSection?: boolean
+}
+
+export function formatMultiPageDaily(options: FormatMultiPageOptions): string[] {
+  const { houseName, date, pages, showNotesSection } = options
+
+  const allLines: string[] = []
+  const totalPages = pages.length
+
+  for (let i = 0; i < totalPages; i++) {
+    const page = pages[i]!
+    const isLastPage = i === totalPages - 1
+
+    switch (page.type) {
+      case 'UNASSIGNED_TASKS':
+        allLines.push(...formatTasksPage(page.tasks, 'TAREFAS GERAIS', houseName, date))
+        break
+
+      case 'EMPLOYEE_TASKS':
+        allLines.push(
+          ...formatTasksPage(
+            page.tasks,
+            page.employee.name.toUpperCase(),
+            houseName,
+            date,
+            showNotesSection
+          )
+        )
+        break
+
+      case 'MENU':
+        allLines.push(...formatMenuPage(houseName, date, page.lunch, page.dinner))
+        break
+
+      case 'SPECIAL_TASK':
+        allLines.push(...formatSpecialTaskPage(houseName, page.task))
+        break
+    }
+
+    // Add cut after each page
+    if (isLastPage) {
+      allLines.push(COMMANDS.CUT) // Full cut for last page
+    } else {
+      allLines.push(COMMANDS.PARTIAL_CUT) // Partial cut between pages
+    }
+  }
+
+  return allLines
+}
+
 export async function printMultiPageDaily(options: PrintMultiPageOptions): Promise<void> {
   const { ip, houseName, date, pages, showNotesSection } = options
 
@@ -528,4 +649,73 @@ export async function printMultiPageDaily(options: PrintMultiPageOptions): Promi
   }
 
   await sendToPrinter(ip, allLines.join(''))
+}
+
+// ============================================
+// CUSTOM MESSAGE PRINTING
+// ============================================
+
+export interface PrintCustomMessageOptions {
+  ip: string
+  type: PrinterType
+  houseName: string
+  title: string
+  content: string
+}
+
+export function formatMessagePage(
+  houseName: string,
+  title: string,
+  content: string
+): string[] {
+  const now = new Date()
+  const dateStr = now.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+  const timeStr = now.toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  const lines: string[] = [
+    COMMANDS.INIT,
+    COMMANDS.SET_CHARSET_PORTUGUESE,
+    COMMANDS.ALIGN_CENTER,
+    `${COMMANDS.LINE}\n`,
+    COMMANDS.DOUBLE_HEIGHT_ON,
+    COMMANDS.BOLD_ON,
+    `${houseName.toUpperCase()}\n`,
+    COMMANDS.BOLD_OFF,
+    COMMANDS.DOUBLE_HEIGHT_OFF,
+    `${COMMANDS.LINE}\n`,
+    '\n',
+    COMMANDS.BOLD_ON,
+    `${title.toUpperCase()}\n`,
+    COMMANDS.BOLD_OFF,
+    `${dateStr} ${timeStr}\n`,
+    '\n',
+    `${COMMANDS.DASH_LINE}\n`,
+    '\n',
+    COMMANDS.ALIGN_LEFT,
+  ]
+
+  // Convert markdown content to ESC/POS
+  const contentLines = markdownToEscPos(content)
+  lines.push(...contentLines)
+
+  lines.push('\n')
+  lines.push(COMMANDS.ALIGN_CENTER)
+  lines.push(`${COMMANDS.LINE}\n`)
+  lines.push('\n\n\n')
+  lines.push(COMMANDS.CUT)
+
+  return lines
+}
+
+export async function printCustomMessage(options: PrintCustomMessageOptions): Promise<void> {
+  const { ip, houseName, title, content } = options
+  const lines = formatMessagePage(houseName, title, content)
+  await sendToPrinter(ip, lines.join(''))
 }

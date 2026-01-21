@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getTasksForDate } from '@/lib/task-scheduler'
+import { escPosToHtml } from '@/lib/escpos-to-html'
+import {
+  formatMultiPageDaily,
+  formatWeeklyMenuPage,
+  type PrintPage,
+  type SpecialTaskItem,
+} from '@/lib/printer'
 
 const ROLE_LABELS: Record<string, string> = {
   FAXINEIRA: 'Faxineira',
@@ -212,11 +219,84 @@ export async function GET(request: NextRequest) {
         year: 'numeric',
       })
 
+      // Build PrintPage array for ESC/POS generation
+      const printPages: PrintPage[] = []
+
+      if (unassignedTasks.length > 0) {
+        printPages.push({
+          type: 'UNASSIGNED_TASKS',
+          tasks: unassignedTasks,
+        })
+      }
+
+      for (const group of Object.values(employeeGroups)) {
+        printPages.push({
+          type: 'EMPLOYEE_TASKS',
+          employee: { name: group.name, role: group.role },
+          tasks: group.tasks,
+        })
+      }
+
+      if (lunch || dinner) {
+        printPages.push({
+          type: 'MENU',
+          lunch,
+          dinner,
+        })
+      }
+
+      // Add special tasks to PrintPage array
+      for (const task of taskResult.specialTasks) {
+        const specialTask: SpecialTaskItem = {
+          title: task.title,
+          description: task.description,
+          dueDate: new Date(task.dueDate),
+          category: task.category,
+          employee: task.employee
+            ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
+            : null,
+        }
+        printPages.push({
+          type: 'SPECIAL_TASK',
+          task: specialTask,
+        })
+      }
+
+      // Add one-off tasks to PrintPage array
+      for (const task of taskResult.oneOffTasks) {
+        const oneOffTask: SpecialTaskItem = {
+          title: task.title,
+          description: task.description,
+          dueDate: new Date(task.dueDate),
+          category: task.category,
+          employee: task.employee
+            ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
+            : null,
+        }
+        printPages.push({
+          type: 'SPECIAL_TASK',
+          task: oneOffTask,
+        })
+      }
+
+      // Generate ESC/POS and convert to HTML
+      let previewHtml = ''
+      if (printPages.length > 0) {
+        const escPosData = formatMultiPageDaily({
+          houseName,
+          date,
+          pages: printPages,
+          showNotesSection: true,
+        })
+        previewHtml = escPosToHtml(escPosData)
+      }
+
       return NextResponse.json({
         type: 'DAILY_TASKS',
         houseName,
         date: formattedDate,
         pages,
+        previewHtml,
         totalTasks: taskResult.tasks.length,
         totalSpecialTasks: taskResult.specialTasks.length,
         totalOneOffTasks: taskResult.oneOffTasks.length,
@@ -251,7 +331,10 @@ export async function GET(request: NextRequest) {
 
       const houseName = houseNameRecord?.value ?? 'Minha Casa'
 
+      // Build days array with both Date objects and formatted strings
       const days = []
+      const daysForPrint: { date: Date; lunch?: string; dinner?: string }[] = []
+
       for (let i = 0; i < 7; i++) {
         const dayDate = new Date(weekStart)
         dayDate.setDate(dayDate.getDate() + i)
@@ -261,24 +344,38 @@ export async function GET(request: NextRequest) {
           (s) => s.date.toISOString().split('T')[0] === dayStr
         )
 
+        const lunch = daySchedules.find((s) => s.mealType === 'ALMOCO')?.dish.name
+        const dinner = daySchedules.find((s) => s.mealType === 'JANTAR')?.dish.name
+
         days.push({
           date: dayDate.toLocaleDateString('pt-BR', {
             weekday: 'long',
             day: '2-digit',
             month: '2-digit',
           }),
-          lunch: daySchedules.find((s) => s.mealType === 'ALMOCO')?.dish.name ?? null,
-          dinner: daySchedules.find((s) => s.mealType === 'JANTAR')?.dish.name ?? null,
+          lunch: lunch ?? null,
+          dinner: dinner ?? null,
+        })
+
+        daysForPrint.push({
+          date: new Date(dayDate),
+          lunch,
+          dinner,
         })
       }
 
       const periodStr = `${weekStart.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} a ${weekEnd.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
+
+      // Generate ESC/POS and convert to HTML
+      const escPosData = formatWeeklyMenuPage(houseName, weekStart, daysForPrint)
+      const previewHtml = escPosToHtml(escPosData)
 
       return NextResponse.json({
         type: 'WEEKLY_MENU',
         houseName,
         period: periodStr,
         days,
+        previewHtml,
       })
     }
 
