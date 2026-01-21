@@ -112,24 +112,28 @@ export default function TasksPage() {
   const fetchTasks = useCallback(async () => {
     try {
       setLoading(true)
-      // Fetch active tasks (including pending ONE_OFF)
+      // Fetch active tasks and archived tasks in parallel
       const params = new URLSearchParams()
       if (showInactive) params.set('includeInactive', 'true')
-      const res = await fetch(`/api/tasks?${params}`)
-      if (!res.ok) throw new Error('Erro ao carregar tarefas')
-      const data = await res.json()
 
-      // Split into active and archived (printed ONE_OFF)
-      const active: Task[] = []
-      const archived: Task[] = []
+      const [activeRes, archivedRes] = await Promise.all([
+        fetch(`/api/tasks?${params}`),
+        fetch('/api/tasks?type=ONE_OFF&includePrinted=true&includeInactive=true')
+      ])
 
-      for (const task of data) {
-        if (task.taskType === 'ONE_OFF' && task.printedAt) {
-          archived.push(task)
-        } else {
-          active.push(task)
-        }
-      }
+      if (!activeRes.ok) throw new Error('Erro ao carregar tarefas')
+      if (!archivedRes.ok) throw new Error('Erro ao carregar arquivo')
+
+      const activeData = await activeRes.json()
+      const archivedData = await archivedRes.json()
+
+      // Filter active tasks (exclude printed ONE_OFF which are in archived)
+      const active = activeData.filter((task: Task) =>
+        !(task.taskType === 'ONE_OFF' && task.printedAt)
+      )
+
+      // Filter archived tasks (only printed ONE_OFF)
+      const archived = archivedData.filter((t: Task) => t.printedAt)
 
       setTasks(active)
       setArchivedTasks(archived)
