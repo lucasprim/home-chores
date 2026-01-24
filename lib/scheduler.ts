@@ -1,20 +1,17 @@
 import cron, { type ScheduledTask } from 'node-cron'
 import { prisma } from './prisma'
-import { getTasksForDate, markOneOffTasksAsPrinted } from './task-scheduler'
-import { printMultiPageDaily, printWeeklyMenu, PrinterType, PrintPage } from './printer'
+import { markOneOffTasksAsPrinted } from './task-scheduler'
+import { printMultiPageDaily, printWeeklyMenu } from './printer'
+import {
+  getPrinterSettings,
+  buildDailyPrintData,
+  getWeeklyMenuData,
+  formatDateStr,
+} from './print-service'
 import type { PrintJob, Employee } from '@prisma/client'
 
 type PrintJobWithEmployee = PrintJob & {
   employee: Pick<Employee, 'id' | 'name' | 'role' | 'workDays'> | null
-}
-
-const ROLE_LABELS: Record<string, string> = {
-  FAXINEIRA: 'Faxineira',
-  COZINHEIRA: 'Cozinheira',
-  BABA: 'Babá',
-  JARDINEIRO: 'Jardineiro',
-  MOTORISTA: 'Motorista',
-  OUTRO: 'Outro',
 }
 
 // Map of job IDs to scheduled tasks
@@ -113,13 +110,6 @@ export async function rescheduleJob(jobId: string): Promise<void> {
   }
 }
 
-function formatDateStr(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
 /**
  * Execute a print job by ID
  */
@@ -142,15 +132,7 @@ export async function executePrintJob(jobId: string): Promise<{
   }
 
   // Get printer settings
-  const [ipRecord, typeRecord, houseRecord] = await Promise.all([
-    prisma.settings.findUnique({ where: { key: 'printer_ip' } }),
-    prisma.settings.findUnique({ where: { key: 'printer_type' } }),
-    prisma.settings.findUnique({ where: { key: 'house_name' } }),
-  ])
-
-  const printerIp = ipRecord?.value ?? '192.168.1.230'
-  const printerType = (typeRecord?.value ?? 'EPSON') as PrinterType
-  const houseName = houseRecord?.value ?? 'Minha Casa'
+  const settings = await getPrinterSettings()
 
   const today = new Date()
   const dayOfWeek = today.getDay()
@@ -168,33 +150,13 @@ export async function executePrintJob(jobId: string): Promise<{
         }
       }
 
-      // Get tasks using unified engine
-      const taskResult = await getTasksForDate(todayStr, {
+      // Build print data using service
+      const printData = await buildDailyPrintData(todayStr, {
         employeeId: job.employeeId || undefined,
       })
 
-      // Get meals for today
-      const meals = await prisma.mealSchedule.findMany({
-        where: {
-          date: {
-            gte: new Date(todayStr),
-            lt: new Date(new Date(todayStr).getTime() + 24 * 60 * 60 * 1000),
-          },
-        },
-        include: { dish: { select: { name: true } } },
-      })
-
-      const lunch = meals.find((m) => m.mealType === 'ALMOCO')?.dish.name
-      const dinner = meals.find((m) => m.mealType === 'JANTAR')?.dish.name
-
       // Check if we have anything to print
-      if (
-        taskResult.tasks.length === 0 &&
-        taskResult.specialTasks.length === 0 &&
-        taskResult.oneOffTasks.length === 0 &&
-        !lunch &&
-        !dinner
-      ) {
+      if (!printData.hasSomethingToPrint) {
         await createPrintLog(jobId, 'SKIPPED', 'Nenhuma tarefa, cardápio, tarefa especial ou avulsa para hoje')
         return {
           success: false,
@@ -203,113 +165,20 @@ export async function executePrintJob(jobId: string): Promise<{
         }
       }
 
-      // Build pages array
-      const pages: PrintPage[] = []
-
-      // Group tasks by employee
-      const unassignedTasks: { title: string; description: string | null }[] = []
-      const employeeGroups: Record<
-        string,
-        {
-          name: string
-          role: string
-          tasks: { title: string; description: string | null }[]
-        }
-      > = {}
-
-      for (const task of taskResult.tasks) {
-        if (!task.employee) {
-          unassignedTasks.push({
-            title: task.title,
-            description: task.description,
-          })
-        } else {
-          const key = task.employee.id
-          if (!employeeGroups[key]) {
-            employeeGroups[key] = {
-              name: task.employee.name,
-              role: ROLE_LABELS[task.employee.role] || task.employee.role,
-              tasks: [],
-            }
-          }
-          employeeGroups[key].tasks.push({
-            title: task.title,
-            description: task.description,
-          })
-        }
-      }
-
-      // Page: Unassigned tasks (if any)
-      if (unassignedTasks.length > 0) {
-        pages.push({
-          type: 'UNASSIGNED_TASKS',
-          tasks: unassignedTasks,
-        })
-      }
-
-      // Pages: One per employee
-      for (const group of Object.values(employeeGroups)) {
-        pages.push({
-          type: 'EMPLOYEE_TASKS',
-          employee: { name: group.name, role: group.role },
-          tasks: group.tasks,
-        })
-      }
-
-      // Page: Menu (if meals exist)
-      if (lunch || dinner) {
-        pages.push({
-          type: 'MENU',
-          lunch,
-          dinner,
-        })
-      }
-
-      // Pages: One per special task
-      for (const task of taskResult.specialTasks) {
-        pages.push({
-          type: 'SPECIAL_TASK',
-          task: {
-            title: task.title,
-            description: task.description,
-            dueDate: new Date(task.dueDate),
-            category: task.category,
-            employee: task.employee
-              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-              : null,
-          },
-        })
-      }
-
-      // Pages: One per one-off task (printed like special tasks)
-      for (const task of taskResult.oneOffTasks) {
-        pages.push({
-          type: 'SPECIAL_TASK',
-          task: {
-            title: task.title,
-            description: task.description,
-            dueDate: new Date(task.dueDate),
-            category: task.category,
-            employee: task.employee
-              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-              : null,
-          },
-        })
-      }
-
       // Print multi-page
       await printMultiPageDaily({
-        ip: printerIp,
-        type: printerType,
-        houseName,
+        ip: settings.ip,
+        type: settings.type,
+        houseName: settings.houseName,
         date: today,
-        pages,
+        pages: printData.pages,
+        showNotesSection: settings.showNotesSection,
       })
 
-      // Mark ONE_OFF tasks as printed using unified function and update job
+      // Mark ONE_OFF tasks as printed and update job
       await Promise.all([
-        taskResult.oneOffTasks.length > 0
-          ? markOneOffTasksAsPrinted(taskResult.oneOffTasks.map((t) => t.id))
+        printData.oneOffTaskIds.length > 0
+          ? markOneOffTasksAsPrinted(printData.oneOffTaskIds)
           : Promise.resolve(),
         createPrintLog(jobId, 'SUCCESS'),
         prisma.printJob.update({
@@ -321,7 +190,7 @@ export async function executePrintJob(jobId: string): Promise<{
       return {
         success: true,
         status: 'SUCCESS',
-        message: `Impresso com sucesso! ${taskResult.tasks.length} tarefa(s), ${taskResult.specialTasks.length} especial(is), ${taskResult.oneOffTasks.length} avulsa(s)`,
+        message: `Impresso com sucesso! ${printData.taskCount} tarefa(s), ${printData.specialTaskCount} especial(is), ${printData.oneOffTaskCount} avulsa(s)`,
       }
     }
 
@@ -332,44 +201,13 @@ export async function executePrintJob(jobId: string): Promise<{
       const diff = day === 0 ? -6 : 1 - day
       weekStart.setDate(weekStart.getDate() + diff)
 
-      const weekEnd = new Date(weekStart)
-      weekEnd.setDate(weekEnd.getDate() + 6)
-
-      // Get meal schedules for the week
-      const schedules = await prisma.mealSchedule.findMany({
-        where: {
-          date: {
-            gte: weekStart,
-            lte: weekEnd,
-          },
-        },
-        include: {
-          dish: { select: { name: true } },
-        },
-        orderBy: { date: 'asc' },
-      })
-
-      const days = []
-      for (let i = 0; i < 7; i++) {
-        const dayDate = new Date(weekStart)
-        dayDate.setDate(dayDate.getDate() + i)
-        const dayStr = dayDate.toISOString().split('T')[0]
-
-        const daySchedules = schedules.filter(
-          (s) => s.date.toISOString().split('T')[0] === dayStr
-        )
-
-        days.push({
-          date: dayDate,
-          lunch: daySchedules.find((s) => s.mealType === 'ALMOCO')?.dish.name,
-          dinner: daySchedules.find((s) => s.mealType === 'JANTAR')?.dish.name,
-        })
-      }
+      // Get weekly menu data using service
+      const days = await getWeeklyMenuData(weekStart)
 
       await printWeeklyMenu({
-        ip: printerIp,
-        type: printerType,
-        houseName,
+        ip: settings.ip,
+        type: settings.type,
+        houseName: settings.houseName,
         weekStart,
         days,
       })

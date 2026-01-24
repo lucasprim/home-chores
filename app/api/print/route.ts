@@ -1,21 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getTasksForDate, markOneOffTasksAsPrinted } from '@/lib/task-scheduler'
+import { markOneOffTasksAsPrinted } from '@/lib/task-scheduler'
+import { printWeeklyMenu, printMultiPageDaily } from '@/lib/printer'
 import {
-  printWeeklyMenu,
-  printMultiPageDaily,
-  PrinterType,
-  PrintPage,
-} from '@/lib/printer'
-
-const ROLE_LABELS: Record<string, string> = {
-  FAXINEIRA: 'Faxineira',
-  COZINHEIRA: 'Cozinheira',
-  BABA: 'Babá',
-  JARDINEIRO: 'Jardineiro',
-  MOTORISTA: 'Motorista',
-  OUTRO: 'Outro',
-}
+  getPrinterSettings,
+  buildDailyPrintData,
+  getWeeklyMenuData,
+} from '@/lib/print-service'
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,162 +27,36 @@ export async function POST(request: NextRequest) {
     }
 
     // Get printer settings
-    const [ipRecord, typeRecord, houseRecord, notesRecord] = await Promise.all([
-      prisma.settings.findUnique({ where: { key: 'printer_ip' } }),
-      prisma.settings.findUnique({ where: { key: 'printer_type' } }),
-      prisma.settings.findUnique({ where: { key: 'house_name' } }),
-      prisma.settings.findUnique({ where: { key: 'print_notes_section' } }),
-    ])
-
-    const printerIp = ipRecord?.value ?? '192.168.1.230'
-    const printerType = (typeRecord?.value ?? 'EPSON') as PrinterType
-    const houseName = houseRecord?.value ?? 'Minha Casa'
-    const showNotesSection = notesRecord?.value === 'true'
+    const settings = await getPrinterSettings()
 
     if (type === 'DAILY_TASKS') {
-      const dateStr = date.toISOString().split('T')[0]!
-
-      // Get tasks using unified engine and meals in parallel
-      const [taskResult, meals] = await Promise.all([
-        getTasksForDate(dateParam, {
-          employeeId: employeeId || undefined,
-          includeSpecialTasks,
-        }),
-        prisma.mealSchedule.findMany({
-          where: {
-            date: {
-              gte: new Date(dateStr),
-              lt: new Date(new Date(dateStr).getTime() + 24 * 60 * 60 * 1000),
-            },
-          },
-          include: { dish: { select: { name: true } } },
-        }),
-      ])
-
-      const lunch = meals.find((m) => m.mealType === 'ALMOCO')?.dish.name
-      const dinner = meals.find((m) => m.mealType === 'JANTAR')?.dish.name
+      // Build print data using service
+      const printData = await buildDailyPrintData(dateParam, {
+        employeeId: employeeId || undefined,
+        includeSpecialTasks,
+      })
 
       // Check if we have anything to print
-      if (
-        taskResult.tasks.length === 0 &&
-        taskResult.specialTasks.length === 0 &&
-        taskResult.oneOffTasks.length === 0 &&
-        !lunch &&
-        !dinner
-      ) {
+      if (!printData.hasSomethingToPrint) {
         return NextResponse.json(
           { error: 'Não há tarefas, cardápio, tarefas especiais ou avulsas para imprimir nesta data' },
           { status: 400 }
         )
       }
 
-      // Build pages array
-      const pages: PrintPage[] = []
-
-      // Group tasks by employee
-      const unassignedTasks: { title: string; description: string | null }[] = []
-      const employeeGroups: Record<
-        string,
-        {
-          name: string
-          role: string
-          tasks: { title: string; description: string | null }[]
-        }
-      > = {}
-
-      for (const task of taskResult.tasks) {
-        if (!task.employee) {
-          unassignedTasks.push({
-            title: task.title,
-            description: task.description,
-          })
-        } else {
-          const key = task.employee.id
-          if (!employeeGroups[key]) {
-            employeeGroups[key] = {
-              name: task.employee.name,
-              role: ROLE_LABELS[task.employee.role] || task.employee.role,
-              tasks: [],
-            }
-          }
-          employeeGroups[key].tasks.push({
-            title: task.title,
-            description: task.description,
-          })
-        }
-      }
-
-      // Page 1: Unassigned tasks (if any)
-      if (unassignedTasks.length > 0) {
-        pages.push({
-          type: 'UNASSIGNED_TASKS',
-          tasks: unassignedTasks,
-        })
-      }
-
-      // Pages: One per employee
-      for (const group of Object.values(employeeGroups)) {
-        pages.push({
-          type: 'EMPLOYEE_TASKS',
-          employee: { name: group.name, role: group.role },
-          tasks: group.tasks,
-        })
-      }
-
-      // Page: Menu (if meals exist)
-      if (lunch || dinner) {
-        pages.push({
-          type: 'MENU',
-          lunch,
-          dinner,
-        })
-      }
-
-      // Pages: One per special task
-      for (const task of taskResult.specialTasks) {
-        pages.push({
-          type: 'SPECIAL_TASK',
-          task: {
-            title: task.title,
-            description: task.description,
-            dueDate: new Date(task.dueDate),
-            category: task.category,
-            employee: task.employee
-              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-              : null,
-          },
-        })
-      }
-
-      // Pages: One per one-off task (printed like special tasks)
-      for (const task of taskResult.oneOffTasks) {
-        pages.push({
-          type: 'SPECIAL_TASK',
-          task: {
-            title: task.title,
-            description: task.description,
-            dueDate: new Date(task.dueDate),
-            category: task.category,
-            employee: task.employee
-              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-              : null,
-          },
-        })
-      }
-
       // Print multi-page
       await printMultiPageDaily({
-        ip: printerIp,
-        type: printerType,
-        houseName,
+        ip: settings.ip,
+        type: settings.type,
+        houseName: settings.houseName,
         date,
-        pages,
-        showNotesSection,
+        pages: printData.pages,
+        showNotesSection: settings.showNotesSection,
       })
 
-      // Mark ONE_OFF tasks as printed using unified function
-      if (taskResult.oneOffTasks.length > 0) {
-        await markOneOffTasksAsPrinted(taskResult.oneOffTasks.map((t) => t.id))
+      // Mark ONE_OFF tasks as printed
+      if (printData.oneOffTaskIds.length > 0) {
+        await markOneOffTasksAsPrinted(printData.oneOffTaskIds)
       }
 
       return NextResponse.json({ success: true, message: 'Impresso com sucesso!' })
@@ -205,44 +69,13 @@ export async function POST(request: NextRequest) {
       const diff = dayNum === 0 ? -6 : 1 - dayNum
       weekStart.setDate(weekStart.getDate() + diff)
 
-      const weekEnd = new Date(weekStart)
-      weekEnd.setDate(weekEnd.getDate() + 6)
-
-      // Get meal schedules for the week
-      const schedules = await prisma.mealSchedule.findMany({
-        where: {
-          date: {
-            gte: weekStart,
-            lte: weekEnd,
-          },
-        },
-        include: {
-          dish: { select: { name: true } },
-        },
-        orderBy: { date: 'asc' },
-      })
-
-      const days = []
-      for (let i = 0; i < 7; i++) {
-        const dayDate = new Date(weekStart)
-        dayDate.setDate(dayDate.getDate() + i)
-        const dayStr = dayDate.toISOString().split('T')[0]
-
-        const daySchedules = schedules.filter(
-          (s) => s.date.toISOString().split('T')[0] === dayStr
-        )
-
-        days.push({
-          date: dayDate,
-          lunch: daySchedules.find((s) => s.mealType === 'ALMOCO')?.dish.name,
-          dinner: daySchedules.find((s) => s.mealType === 'JANTAR')?.dish.name,
-        })
-      }
+      // Get weekly menu data using service
+      const days = await getWeeklyMenuData(weekStart)
 
       await printWeeklyMenu({
-        ip: printerIp,
-        type: printerType,
-        houseName,
+        ip: settings.ip,
+        type: settings.type,
+        houseName: settings.houseName,
         weekStart,
         days,
       })

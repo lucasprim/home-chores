@@ -1,22 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
-import { getTasksForDate } from '@/lib/task-scheduler'
 import { escPosToHtml } from '@/lib/escpos-to-html'
 import {
   formatMultiPageDaily,
   formatWeeklyMenuPage,
-  type PrintPage,
-  type SpecialTaskItem,
 } from '@/lib/printer'
-
-const ROLE_LABELS: Record<string, string> = {
-  FAXINEIRA: 'Faxineira',
-  COZINHEIRA: 'Cozinheira',
-  BABA: 'Babá',
-  JARDINEIRO: 'Jardineiro',
-  MOTORISTA: 'Motorista',
-  OUTRO: 'Outro',
-}
+import {
+  getPrinterSettings,
+  buildDailyPrintData,
+  getWeeklyMenuData,
+} from '@/lib/print-service'
 
 export type PreviewPage =
   | {
@@ -72,78 +64,32 @@ export async function GET(request: NextRequest) {
     }
 
     if (type === 'DAILY_TASKS') {
-      const dateStr = date.toISOString().split('T')[0]!
-
-      // Get tasks using unified engine and meals in parallel
-      const [taskResult, houseNameRecord, meals] = await Promise.all([
-        getTasksForDate(dateParam, {
+      // Get print data and settings in parallel
+      const [printData, settings] = await Promise.all([
+        buildDailyPrintData(dateParam, {
           employeeId: employeeId || undefined,
           includeSpecialTasks,
         }),
-        prisma.settings.findUnique({ where: { key: 'house_name' } }),
-        prisma.mealSchedule.findMany({
-          where: {
-            date: {
-              gte: new Date(dateStr),
-              lt: new Date(new Date(dateStr).getTime() + 24 * 60 * 60 * 1000),
-            },
-          },
-          select: { mealType: true, dish: { select: { name: true } } },
-        }),
+        getPrinterSettings(),
       ])
 
-      const houseName = houseNameRecord?.value ?? 'Minha Casa'
-      const lunch = meals.find((m) => m.mealType === 'ALMOCO')?.dish.name
-      const dinner = meals.find((m) => m.mealType === 'JANTAR')?.dish.name
+      // Build preview pages with titles and formatted data
+      const previewPages: PreviewPage[] = []
+      const normalizedDate = new Date(date)
+      normalizedDate.setHours(0, 0, 0, 0)
 
-      // Build pages array
-      const pages: PreviewPage[] = []
-
-      // Group recurring tasks by employee
-      const unassignedTasks: { title: string; description: string | null }[] = []
-      const employeeGroups: Record<
-        string,
-        {
-          name: string
-          role: string
-          tasks: { title: string; description: string | null }[]
-        }
-      > = {}
-
-      for (const task of taskResult.tasks) {
-        if (!task.employee) {
-          unassignedTasks.push({
-            title: task.title,
-            description: task.description,
-          })
-        } else {
-          const key = task.employee.id
-          if (!employeeGroups[key]) {
-            employeeGroups[key] = {
-              name: task.employee.name,
-              role: ROLE_LABELS[task.employee.role] || task.employee.role,
-              tasks: [],
-            }
-          }
-          employeeGroups[key].tasks.push({
-            title: task.title,
-            description: task.description,
-          })
-        }
-      }
-
-      // Page 1: Unassigned tasks (if any)
-      if (unassignedTasks.length > 0) {
-        pages.push({
+      // Unassigned tasks page
+      if (printData.unassignedTasks.length > 0) {
+        previewPages.push({
           type: 'UNASSIGNED_TASKS',
           title: 'Tarefas Gerais',
-          tasks: unassignedTasks,
+          tasks: printData.unassignedTasks,
         })
       }
 
-      // Pages: One per employee
-      for (const group of Object.values(employeeGroups)) {
-        pages.push({
+      // Employee pages
+      for (const group of Object.values(printData.employeeGroups)) {
+        previewPages.push({
           type: 'EMPLOYEE_TASKS',
           title: group.name,
           employee: { name: group.name, role: group.role },
@@ -151,28 +97,25 @@ export async function GET(request: NextRequest) {
         })
       }
 
-      // Page: Menu (if meals exist)
-      if (lunch || dinner) {
-        pages.push({
+      // Menu page
+      if (printData.lunch || printData.dinner) {
+        previewPages.push({
           type: 'MENU',
           title: 'Cardápio do Dia',
-          lunch,
-          dinner,
+          lunch: printData.lunch,
+          dinner: printData.dinner,
         })
       }
 
-      // Pages: One per special task
-      const normalizedDate = new Date(date)
-      normalizedDate.setHours(0, 0, 0, 0)
-
-      for (const task of taskResult.specialTasks) {
+      // Special task pages
+      for (const task of printData.specialTasks) {
         const taskDueDate = new Date(task.dueDate)
         taskDueDate.setHours(0, 0, 0, 0)
         const daysRemaining = Math.ceil(
           (taskDueDate.getTime() - normalizedDate.getTime()) / (1000 * 60 * 60 * 24)
         )
 
-        pages.push({
+        previewPages.push({
           type: 'SPECIAL_TASK',
           title: 'Tarefa Especial',
           task: {
@@ -181,22 +124,20 @@ export async function GET(request: NextRequest) {
             dueDate: taskDueDate.toLocaleDateString('pt-BR'),
             daysRemaining,
             category: task.category,
-            employee: task.employee
-              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-              : null,
+            employee: task.employee,
           },
         })
       }
 
-      // Pages: One per one-off task (printed like special tasks)
-      for (const task of taskResult.oneOffTasks) {
+      // One-off task pages
+      for (const task of printData.oneOffTasks) {
         const taskDueDate = new Date(task.dueDate)
         taskDueDate.setHours(0, 0, 0, 0)
         const daysRemaining = Math.ceil(
           (taskDueDate.getTime() - normalizedDate.getTime()) / (1000 * 60 * 60 * 24)
         )
 
-        pages.push({
+        previewPages.push({
           type: 'SPECIAL_TASK',
           title: 'Tarefa Avulsa',
           task: {
@@ -205,9 +146,7 @@ export async function GET(request: NextRequest) {
             dueDate: taskDueDate.toLocaleDateString('pt-BR'),
             daysRemaining,
             category: task.category,
-            employee: task.employee
-              ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-              : null,
+            employee: task.employee,
           },
         })
       }
@@ -219,88 +158,28 @@ export async function GET(request: NextRequest) {
         year: 'numeric',
       })
 
-      // Build PrintPage array for ESC/POS generation
-      const printPages: PrintPage[] = []
-
-      if (unassignedTasks.length > 0) {
-        printPages.push({
-          type: 'UNASSIGNED_TASKS',
-          tasks: unassignedTasks,
-        })
-      }
-
-      for (const group of Object.values(employeeGroups)) {
-        printPages.push({
-          type: 'EMPLOYEE_TASKS',
-          employee: { name: group.name, role: group.role },
-          tasks: group.tasks,
-        })
-      }
-
-      if (lunch || dinner) {
-        printPages.push({
-          type: 'MENU',
-          lunch,
-          dinner,
-        })
-      }
-
-      // Add special tasks to PrintPage array
-      for (const task of taskResult.specialTasks) {
-        const specialTask: SpecialTaskItem = {
-          title: task.title,
-          description: task.description,
-          dueDate: new Date(task.dueDate),
-          category: task.category,
-          employee: task.employee
-            ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-            : null,
-        }
-        printPages.push({
-          type: 'SPECIAL_TASK',
-          task: specialTask,
-        })
-      }
-
-      // Add one-off tasks to PrintPage array
-      for (const task of taskResult.oneOffTasks) {
-        const oneOffTask: SpecialTaskItem = {
-          title: task.title,
-          description: task.description,
-          dueDate: new Date(task.dueDate),
-          category: task.category,
-          employee: task.employee
-            ? { name: task.employee.name, role: ROLE_LABELS[task.employee.role] || task.employee.role }
-            : null,
-        }
-        printPages.push({
-          type: 'SPECIAL_TASK',
-          task: oneOffTask,
-        })
-      }
-
-      // Generate ESC/POS and convert to HTML
+      // Generate ESC/POS and convert to HTML using the printData.pages
       let previewHtml = ''
-      if (printPages.length > 0) {
+      if (printData.pages.length > 0) {
         const escPosData = formatMultiPageDaily({
-          houseName,
+          houseName: settings.houseName,
           date,
-          pages: printPages,
-          showNotesSection: true,
+          pages: printData.pages,
+          showNotesSection: settings.showNotesSection,
         })
         previewHtml = escPosToHtml(escPosData)
       }
 
       return NextResponse.json({
         type: 'DAILY_TASKS',
-        houseName,
+        houseName: settings.houseName,
         date: formattedDate,
-        pages,
+        pages: previewPages,
         previewHtml,
-        totalTasks: taskResult.tasks.length,
-        totalSpecialTasks: taskResult.specialTasks.length,
-        totalOneOffTasks: taskResult.oneOffTasks.length,
-        hasMenu: !!(lunch || dinner),
+        totalTasks: printData.taskCount,
+        totalSpecialTasks: printData.specialTaskCount,
+        totalOneOffTasks: printData.oneOffTaskCount,
+        hasMenu: printData.hasMenu,
       })
     }
 
@@ -314,65 +193,32 @@ export async function GET(request: NextRequest) {
       const weekEnd = new Date(weekStart)
       weekEnd.setDate(weekEnd.getDate() + 6)
 
-      // Run queries in parallel
-      const [houseNameRecord, schedules] = await Promise.all([
-        prisma.settings.findUnique({ where: { key: 'house_name' } }),
-        prisma.mealSchedule.findMany({
-          where: {
-            date: {
-              gte: weekStart,
-              lte: weekEnd,
-            },
-          },
-          select: { date: true, mealType: true, dish: { select: { name: true } } },
-          orderBy: { date: 'asc' },
-        }),
+      // Get settings and menu data in parallel
+      const [settings, daysData] = await Promise.all([
+        getPrinterSettings(),
+        getWeeklyMenuData(weekStart),
       ])
 
-      const houseName = houseNameRecord?.value ?? 'Minha Casa'
-
-      // Build days array with both Date objects and formatted strings
-      const days = []
-      const daysForPrint: { date: Date; lunch?: string; dinner?: string }[] = []
-
-      for (let i = 0; i < 7; i++) {
-        const dayDate = new Date(weekStart)
-        dayDate.setDate(dayDate.getDate() + i)
-        const dayStr = dayDate.toISOString().split('T')[0]
-
-        const daySchedules = schedules.filter(
-          (s) => s.date.toISOString().split('T')[0] === dayStr
-        )
-
-        const lunch = daySchedules.find((s) => s.mealType === 'ALMOCO')?.dish.name
-        const dinner = daySchedules.find((s) => s.mealType === 'JANTAR')?.dish.name
-
-        days.push({
-          date: dayDate.toLocaleDateString('pt-BR', {
-            weekday: 'long',
-            day: '2-digit',
-            month: '2-digit',
-          }),
-          lunch: lunch ?? null,
-          dinner: dinner ?? null,
-        })
-
-        daysForPrint.push({
-          date: new Date(dayDate),
-          lunch,
-          dinner,
-        })
-      }
+      // Build days array for JSON response
+      const days = daysData.map((day) => ({
+        date: day.date.toLocaleDateString('pt-BR', {
+          weekday: 'long',
+          day: '2-digit',
+          month: '2-digit',
+        }),
+        lunch: day.lunch ?? null,
+        dinner: day.dinner ?? null,
+      }))
 
       const periodStr = `${weekStart.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} a ${weekEnd.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
 
       // Generate ESC/POS and convert to HTML
-      const escPosData = formatWeeklyMenuPage(houseName, weekStart, daysForPrint)
+      const escPosData = formatWeeklyMenuPage(settings.houseName, weekStart, daysData)
       const previewHtml = escPosToHtml(escPosData)
 
       return NextResponse.json({
         type: 'WEEKLY_MENU',
-        houseName,
+        houseName: settings.houseName,
         period: periodStr,
         days,
         previewHtml,
