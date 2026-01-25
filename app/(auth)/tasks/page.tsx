@@ -285,9 +285,9 @@ export default function TasksPage() {
     parts.push(task.employee?.name || 'Sem atrib.')
 
     if (task.taskType === 'ONE_OFF') {
-      parts.push(`${task.dueDays || 7}d`)
+      parts.push(`${task.dueDays ?? 7}d`)
     } else if (task.taskType === 'SPECIAL') {
-      parts.push(`${task.dueDays || 7}d`)
+      parts.push(`${task.dueDays ?? 7}d`)
       if (task.rrule) parts.push(rruleToReadable(task.rrule))
     } else if (task.rrule) {
       parts.push(rruleToReadable(task.rrule))
@@ -539,7 +539,7 @@ export default function TasksPage() {
                         <span className="text-lg">{CATEGORY_ICONS[task.category]}</span>
                         <span className="font-medium truncate">{task.title}</span>
                         <span className="text-xs text-[var(--muted-foreground)] truncate hidden sm:inline">
-                          · {task.employee?.name || 'Sem atrib.'} · {task.dueDays || 7}d
+                          · {task.employee?.name || 'Sem atrib.'} · {task.dueDays ?? 7}d
                         </span>
                         <Badge variant="success" className="text-xs px-1.5 py-0">
                           Impresso {task.printedAt && new Date(task.printedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
@@ -968,19 +968,23 @@ function TaskForm({ task, employees, defaultType, onSuccess, onCancel }: TaskFor
       {/* Due Days (for SPECIAL and ONE_OFF) */}
       {(taskType === 'SPECIAL' || taskType === 'ONE_OFF') && (
         <div>
-          <label className="block text-sm font-medium mb-1">Prazo para conclusão (dias) *</label>
+          <label className="block text-sm font-medium mb-1">Prazo para conclusão (dias)</label>
           <input
             type="number"
-            min={1}
+            min={0}
             max={365}
             value={dueDays}
-            onChange={(e) => setDueDays(parseInt(e.target.value) || 7)}
+            onChange={(e) => setDueDays(e.target.value === '' ? 0 : parseInt(e.target.value))}
             className="w-24 h-10 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)]"
           />
           <p className="text-xs text-[var(--muted-foreground)] mt-1">
-            {taskType === 'ONE_OFF'
-              ? `A tarefa terá ${dueDays} dia${dueDays > 1 ? 's' : ''} para ser concluída após a impressão.`
-              : `Quando a tarefa aparece na agenda, terá ${dueDays} dia${dueDays > 1 ? 's' : ''} para ser concluída.`}
+            {dueDays === 0
+              ? (taskType === 'ONE_OFF'
+                ? 'A tarefa deve ser concluída no mesmo dia da impressão.'
+                : 'A tarefa deve ser concluída no mesmo dia em que aparece.')
+              : (taskType === 'ONE_OFF'
+                ? `A tarefa terá ${dueDays} dia${dueDays > 1 ? 's' : ''} para ser concluída após a impressão.`
+                : `Quando a tarefa aparece na agenda, terá ${dueDays} dia${dueDays > 1 ? 's' : ''} para ser concluída.`)}
           </p>
         </div>
       )}

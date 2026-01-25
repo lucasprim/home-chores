@@ -213,14 +213,14 @@ export async function getTasksForDate(
     .filter((task) => isTaskScheduledForDay(task, date, dayOfWeek))
     .map((task) => {
       const dueDate = new Date(date)
-      dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
+      dueDate.setDate(dueDate.getDate() + (task.dueDays ?? 7))
       return {
         id: task.id,
         title: task.title,
         description: task.description,
         category: task.category,
         taskType: TaskType.SPECIAL,
-        dueDays: task.dueDays || 7,
+        dueDays: task.dueDays ?? 7,
         appearDate: dateStr,
         dueDate: formatDateStr(dueDate),
         employee: task.employee
@@ -239,14 +239,14 @@ export async function getTasksForDate(
     .filter((task) => isOneOffTaskScheduledForDay(task, dayOfWeek))
     .map((task) => {
       const dueDate = new Date(date)
-      dueDate.setDate(dueDate.getDate() + (task.dueDays || 7))
+      dueDate.setDate(dueDate.getDate() + (task.dueDays ?? 7))
       return {
         id: task.id,
         title: task.title,
         description: task.description,
         category: task.category,
         taskType: TaskType.ONE_OFF,
-        dueDays: task.dueDays || 7,
+        dueDays: task.dueDays ?? 7,
         dueDate: formatDateStr(dueDate),
         employee: task.employee
           ? {

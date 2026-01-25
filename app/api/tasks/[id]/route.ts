@@ -71,11 +71,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // DueDays validation (for SPECIAL and ONE_OFF)
-    if (dueDays !== undefined) {
+    // DueDays validation (for SPECIAL and ONE_OFF) - 0 means same day
+    if (dueDays !== undefined && dueDays !== null && dueDays !== '') {
       const parsedDueDays = parseInt(dueDays)
-      if (isNaN(parsedDueDays) || parsedDueDays < 1 || parsedDueDays > 365) {
-        return NextResponse.json({ error: 'Prazo deve ser entre 1 e 365 dias' }, { status: 400 })
+      if (isNaN(parsedDueDays) || parsedDueDays < 0 || parsedDueDays > 365) {
+        return NextResponse.json({ error: 'Prazo deve ser entre 0 e 365 dias' }, { status: 400 })
       }
     }
 

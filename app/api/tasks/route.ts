@@ -117,10 +117,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (type === TaskType.SPECIAL || type === TaskType.ONE_OFF) {
-      // SPECIAL and ONE_OFF require dueDays
-      const parsedDueDays = dueDays !== undefined ? parseInt(dueDays) : 7
-      if (isNaN(parsedDueDays) || parsedDueDays < 1 || parsedDueDays > 365) {
-        return NextResponse.json({ error: 'Prazo deve ser entre 1 e 365 dias' }, { status: 400 })
+      // SPECIAL and ONE_OFF require dueDays (0 = same day, null = default to 7)
+      const parsedDueDays = dueDays !== undefined && dueDays !== null && dueDays !== '' ? parseInt(dueDays) : 7
+      if (isNaN(parsedDueDays) || parsedDueDays < 0 || parsedDueDays > 365) {
+        return NextResponse.json({ error: 'Prazo deve ser entre 0 e 365 dias' }, { status: 400 })
       }
       validatedDueDays = parsedDueDays
     }
