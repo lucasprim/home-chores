@@ -264,13 +264,47 @@ export function getScheduledWeekdays(
           const weekday = typeof d === 'number' ? d : d.weekday
           return rruleToJsDayMap[weekday] ?? weekday
         })
-      } else if (options.freq === RRule.MONTHLY && options.bymonthday && options.bymonthday.length > 0) {
-        // For monthly, we need to check which weekday the specific date falls on
-        // Since this varies by month, return all days as we can't determine statically
-        baseWeekdays = [0, 1, 2, 3, 4, 5, 6]
+      } else if (options.freq === RRule.MONTHLY && weekStart) {
+        // For monthly rules, calculate actual occurrences in this specific week
+        const dtstart = taskStartDate
+          ? new Date(Date.UTC(taskStartDate.getFullYear(), taskStartDate.getMonth(), taskStartDate.getDate(), 0, 0, 0))
+          : new Date(Date.UTC(2000, 0, 1, 0, 0, 0))
+
+        const ruleWithStart = new RRule({
+          ...rule.origOptions,
+          dtstart,
+        })
+
+        const weekStartUTC = new Date(Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate(), 0, 0, 0))
+        const weekEndUTC = new Date(Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6, 23, 59, 59))
+
+        const occurrences = ruleWithStart.between(weekStartUTC, weekEndUTC, true)
+        baseWeekdays = [...new Set(occurrences.map(d => d.getUTCDay()))]
+      } else if (options.freq === RRule.MONTHLY) {
+        // No weekStart provided - can't determine which days, return empty
+        baseWeekdays = []
+      } else if (options.freq === RRule.YEARLY && weekStart) {
+        // For yearly rules, calculate actual occurrences in this specific week
+        const dtstart = taskStartDate
+          ? new Date(Date.UTC(taskStartDate.getFullYear(), taskStartDate.getMonth(), taskStartDate.getDate(), 0, 0, 0))
+          : new Date(Date.UTC(2000, 0, 1, 0, 0, 0))
+
+        const ruleWithStart = new RRule({
+          ...rule.origOptions,
+          dtstart,
+        })
+
+        const weekStartUTC = new Date(Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate(), 0, 0, 0))
+        const weekEndUTC = new Date(Date.UTC(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 6, 23, 59, 59))
+
+        const occurrences = ruleWithStart.between(weekStartUTC, weekEndUTC, true)
+        baseWeekdays = [...new Set(occurrences.map(d => d.getUTCDay()))]
+      } else if (options.freq === RRule.YEARLY) {
+        // No weekStart provided - can't determine which days, return empty
+        baseWeekdays = []
       } else {
-        // For other complex rules, return all days (conservative approach)
-        baseWeekdays = [0, 1, 2, 3, 4, 5, 6]
+        // For other complex rules without weekStart, return empty (can't determine)
+        baseWeekdays = []
       }
     }
 
