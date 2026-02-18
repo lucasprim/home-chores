@@ -5,7 +5,7 @@ import { MealType, DishCategory } from '@prisma/client'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { startDate, endDate, mealTypes, overwrite } = body
+    const { startDate, endDate, mealTypes, overwrite, weekdaysOnly } = body
 
     if (!startDate || !endDate) {
       return NextResponse.json({ error: 'startDate e endDate são obrigatórios' }, { status: 400 })
@@ -61,6 +61,12 @@ export async function POST(request: NextRequest) {
     while (currentDate <= end) {
       const dateObj = new Date(currentDate)
       dateObj.setHours(0, 0, 0, 0)
+
+      // Skip weekends when weekdaysOnly is true
+      if (weekdaysOnly && (dateObj.getDay() === 0 || dateObj.getDay() === 6)) {
+        currentDate.setDate(currentDate.getDate() + 1)
+        continue
+      }
 
       for (const mealType of typesToRandomize) {
         const category = mealToCategory[mealType]

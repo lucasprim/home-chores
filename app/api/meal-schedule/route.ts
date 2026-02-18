@@ -113,21 +113,29 @@ export async function DELETE(request: NextRequest) {
     const date = searchParams.get('date')
     const mealType = searchParams.get('mealType')
 
-    if (!date || !mealType) {
-      return NextResponse.json({ error: 'date e mealType são obrigatórios' }, { status: 400 })
+    if (!date) {
+      return NextResponse.json({ error: 'date é obrigatório' }, { status: 400 })
     }
 
     const dateObj = parseLocalDate(date)
     dateObj.setHours(0, 0, 0, 0)
 
-    await prisma.mealSchedule.delete({
-      where: {
-        date_mealType: {
-          date: dateObj,
-          mealType: mealType as MealType,
+    if (mealType) {
+      // Delete single meal
+      await prisma.mealSchedule.delete({
+        where: {
+          date_mealType: {
+            date: dateObj,
+            mealType: mealType as MealType,
+          },
         },
-      },
-    })
+      })
+    } else {
+      // Delete all meals for the day
+      await prisma.mealSchedule.deleteMany({
+        where: { date: dateObj },
+      })
+    }
 
     return NextResponse.json({ success: true })
   } catch {

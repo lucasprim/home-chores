@@ -12,9 +12,11 @@ interface DropdownMenuItem {
 interface DropdownMenuProps {
   items: DropdownMenuItem[]
   children?: ReactNode
+  triggerClassName?: string
+  disabled?: boolean
 }
 
-export function DropdownMenu({ items, children }: DropdownMenuProps) {
+export function DropdownMenu({ items, children, triggerClassName, disabled }: DropdownMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0, openUpward: false })
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -39,6 +41,7 @@ export function DropdownMenu({ items, children }: DropdownMenuProps) {
   }, [isOpen])
 
   const handleToggle = () => {
+    if (disabled) return
     if (!isOpen && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect()
       const menuHeight = items.length * 40 + 8
@@ -60,7 +63,7 @@ export function DropdownMenu({ items, children }: DropdownMenuProps) {
         ref={buttonRef}
         type="button"
         onClick={handleToggle}
-        className="p-1.5 rounded-md hover:bg-[var(--secondary)] transition-colors"
+        className={triggerClassName || "p-1.5 rounded-md hover:bg-[var(--secondary)] transition-colors"}
         aria-label="Menu"
       >
         {children || (

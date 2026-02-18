@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button, Card, CardContent, Modal, Input, Badge } from '@/components/ui'
+import { Button, Card, CardContent, Modal, Input, Badge, DropdownMenu } from '@/components/ui'
 import { DishCategory, MealType } from '@prisma/client'
 
 interface Dish {
@@ -117,7 +117,7 @@ export default function MenuPage() {
     load()
   }, [fetchSchedules, fetchDishes])
 
-  const handleRandomize = async () => {
+  const handleRandomize = async (weekdaysOnly: boolean) => {
     try {
       setRandomizing(true)
       setError(null)
@@ -137,6 +137,7 @@ export default function MenuPage() {
           endDate: formatDate(endDate),
           mealTypes: ['ALMOCO', 'JANTAR'],
           overwrite: false,
+          weekdaysOnly,
         }),
       })
 
@@ -150,6 +151,22 @@ export default function MenuPage() {
       setError(err instanceof Error ? err.message : 'Erro ao randomizar')
     } finally {
       setRandomizing(false)
+    }
+  }
+
+  const handleClearDay = async (date: Date, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const daySchedules = getScheduleForDay(date)
+    if (daySchedules.length === 0) return
+    if (!confirm('Limpar todas as refeições deste dia?')) return
+
+    try {
+      const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      const res = await fetch(`/api/meal-schedule?date=${dateStr}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Erro ao limpar dia')
+      await fetchSchedules()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao limpar dia')
     }
   }
 
@@ -234,9 +251,16 @@ export default function MenuPage() {
               </Button>
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={handleRandomize} disabled={randomizing}>
-                {randomizing ? 'Randomizando...' : 'Randomizar mês'}
-              </Button>
+              <DropdownMenu
+                disabled={randomizing}
+                triggerClassName="px-3 py-1.5 text-sm rounded-lg border border-[var(--border)] bg-[var(--secondary)] hover:bg-[var(--secondary)]/80 transition-colors"
+                items={[
+                  { label: 'Todos os dias', onClick: () => handleRandomize(false) },
+                  { label: 'Somente dias úteis', onClick: () => handleRandomize(true) },
+                ]}
+              >
+                {randomizing ? 'Randomizando...' : 'Randomizar mês ▾'}
+              </DropdownMenu>
               <Button
                 variant="secondary"
                 size="sm"
@@ -264,7 +288,7 @@ export default function MenuPage() {
                     <div
                       key={index}
                       className={`
-                        min-h-24 p-1 rounded-lg text-sm
+                        group relative min-h-24 p-1 rounded-lg text-sm
                         ${date ? 'cursor-pointer hover:bg-[var(--secondary)]' : ''}
                         ${isToday ? 'bg-blue-100 dark:bg-blue-900/30 border-2 border-[var(--primary)]' : ''}
                       `}
@@ -272,8 +296,20 @@ export default function MenuPage() {
                     >
                       {date && (
                         <>
-                          <div className={`font-medium ${isToday ? 'text-[var(--primary)]' : ''}`}>
-                            {date.getDate()}
+                          <div className="flex items-center justify-between">
+                            <div className={`font-medium ${isToday ? 'text-[var(--primary)]' : ''}`}>
+                              {date.getDate()}
+                            </div>
+                            {daySchedules.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleClearDay(date, e)}
+                                className="w-5 h-5 flex items-center justify-center rounded text-xs text-[var(--muted-foreground)] hover:bg-[var(--destructive)] hover:text-white transition-colors opacity-0 group-hover:opacity-100 max-md:opacity-40"
+                                title="Limpar dia"
+                              >
+                                ✕
+                              </button>
+                            )}
                           </div>
                           {MEAL_TYPES.map((mealType) => {
                             const schedule = daySchedules.find((s) => s.mealType === mealType)
